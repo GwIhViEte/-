@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AI小说生成器 - 快速打包脚本 v4.1.2
+AI_Novel_Generator - 快速打包脚本 v4.1.2
 自动使用最佳设置进行打包，无需用户交互
 """
 
@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 import json
+
 
 def clean_build_dirs():
     """清理构建目录"""
@@ -23,21 +24,33 @@ def clean_build_dirs():
             except Exception as e:
                 print(f"清理 {dir_name} 失败: {e}")
 
+
 def ensure_pyinstaller():
     """确保PyInstaller已安装"""
     try:
         import PyInstaller
+
         print(f"PyInstaller 版本: {PyInstaller.__version__}")
         return True
     except ImportError:
         print("正在安装 PyInstaller...")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller>=6.0.0"])
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "pyinstaller>=6.0.0",
+                ]
+            )
             print("PyInstaller 安装完成")
             return True
         except Exception as e:
             print(f"PyInstaller 安装失败: {e}")
             return False
+
 
 def create_version_file():
     """创建版本信息文件"""
@@ -81,15 +94,16 @@ StringFileInfo(
     StringStruct(u'OriginalFilename', u'AI小说生成器_v4.1.2.exe'),
     StringStruct(u'ProductName', u'AI小说生成器'),
     StringStruct(u'ProductVersion', u'4.1.2')])
-  ]), 
-VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
-  ]
-)
+    ]),
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
+    ]
+    )
 """
-    
+
     with open("version_info.txt", "w", encoding="utf-8") as f:
         f.write(version_info)
     print("已创建版本信息文件")
+
 
 def main():
     """主打包函数"""
@@ -97,34 +111,36 @@ def main():
     print("  AI小说生成器 - 快速打包脚本 v4.1.2")
     print("  修复内容清理bug + 媒体生成功能")
     print("=" * 60)
-    
+
     start_time = time.time()
-    
+
     # 检查主文件是否存在
     if not os.path.exists("main.py"):
         print("错误: 找不到 main.py 文件")
         print("请确保在项目根目录运行此脚本")
         sys.exit(1)
-    
+
     # 清理构建目录
     clean_build_dirs()
-    
+
     # 确保PyInstaller已安装
     if not ensure_pyinstaller():
         print("无法安装PyInstaller，打包终止")
         sys.exit(1)
-    
+
     # 创建版本信息文件
     create_version_file()
-    
+
     # 检查资源文件
     if not os.path.exists("resources"):
         os.makedirs("resources")
         print("已创建 resources 目录")
-    
+
     # 构建PyInstaller命令
     cmd = [
-        sys.executable, "-m", "PyInstaller",
+        sys.executable,
+        "-m",
+        "PyInstaller",
         "--name=AI小说生成器_v4.1.2",
         "--onedir",  # 使用目录模式，更稳定
         "--windowed",  # 隐藏控制台
@@ -146,35 +162,42 @@ def main():
         "--exclude-module=pytest",
         "--version-file=version_info.txt",
     ]
-    
+
     # 添加图标（如果存在）
     icon_path = os.path.join("resources", "icon.ico")
     if os.path.exists(icon_path):
         cmd.extend(["--icon", icon_path])
-    
+
     # 添加主文件
     cmd.append("main.py")
-    
+
     print("正在执行打包命令:")
     print(" ".join(cmd))
     print("\n开始打包...")
-    
+
     try:
         # 执行打包
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='gbk', errors='ignore')
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="gbk",
+            errors="ignore",
+        )
         print("打包命令执行成功")
-        
+
         # 计算耗时
         elapsed_time = time.time() - start_time
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
-        
+
         print(f"\n打包完成！耗时: {minutes}分{seconds}秒")
-        
+
         # 检查输出目录
         if os.path.exists("dist"):
             print("可执行文件位于 dist 目录")
-            
+
             # 复制说明文档
             docs_to_copy = [
                 ("README.md", "使用说明.md"),
@@ -182,7 +205,7 @@ def main():
                 ("USER_GUIDE.md", "用户指南.md"),
                 ("PACKAGING_GUIDE.md", "打包指南.md"),
             ]
-            
+
             for src, dst in docs_to_copy:
                 if os.path.exists(src):
                     try:
@@ -190,7 +213,7 @@ def main():
                         print(f"已复制 {src} -> {dst}")
                     except Exception as e:
                         print(f"复制 {src} 失败: {e}")
-            
+
             # 创建清洁的配置文件
             clean_config = {
                 "api_key": "",
@@ -209,9 +232,9 @@ def main():
                 "generate_music": False,
                 "num_cover_images": 1,
                 "midjourney_api_key": "",
-                "suno_api_key": ""
+                "suno_api_key": "",
             }
-            
+
             try:
                 config_path = os.path.join("dist", "novel_generator_config.json")
                 with open(config_path, "w", encoding="utf-8") as f:
@@ -219,9 +242,9 @@ def main():
                 print("已创建默认配置文件")
             except Exception as e:
                 print(f"创建配置文件失败: {e}")
-            
+
             # 创建更新日志
-            changelog = f"""AI小说生成器 v4.1.2 更新日志
+            changelog = f"""AI_Novel_Generator v4.1.2 更新日志
 ================================
 
 发布时间: {time.strftime('%Y-%m-%d %H:%M:%S')}
@@ -254,7 +277,7 @@ def main():
 - 媒体生成功能为可选功能，不影响基本的小说生成
 - 请确保网络连接稳定以获得最佳体验
 """
-            
+
             try:
                 changelog_path = os.path.join("dist", "更新日志_v4.1.2.txt")
                 with open(changelog_path, "w", encoding="utf-8") as f:
@@ -262,7 +285,7 @@ def main():
                 print("已创建更新日志")
             except Exception as e:
                 print(f"创建更新日志失败: {e}")
-            
+
             # 尝试打开输出目录
             try:
                 if sys.platform == "win32":
@@ -276,7 +299,7 @@ def main():
                 print(f"输出目录位置: {os.path.abspath('dist')}")
         else:
             print("打包失败: 未找到输出目录")
-            
+
     except subprocess.CalledProcessError as e:
         print(f"打包失败: {e}")
         if e.stdout:
@@ -288,8 +311,9 @@ def main():
     except Exception as e:
         print(f"打包过程中发生错误: {e}")
         import traceback
+
         traceback.print_exc()
-    
+
     finally:
         # 清理临时文件
         temp_files = ["version_info.txt"]
@@ -300,8 +324,9 @@ def main():
                     print(f"已清理临时文件: {temp_file}")
                 except Exception as e:
                     print(f"清理临时文件 {temp_file} 失败: {e}")
-    
+
     print("\n打包过程结束")
 
+
 if __name__ == "__main__":
-    main() 
+    main()

@@ -91,17 +91,17 @@ jobs:
     - name: Build executable (Windows)
       if: matrix.platform == 'windows'
       run: |
-        pyinstaller --onefile --windowed --name "AI小说生成器_v${{ steps.get-version.outputs.version }}" --icon=resources/icon.ico main.py
+        pyinstaller --onefile --windowed --name "AI_Novel_Generator_v${{ steps.get-version.outputs.version }}" --icon=resources/icon.ico main.py
 
     - name: Build executable (Linux)
       if: matrix.platform == 'linux'
       run: |
-        pyinstaller --onefile --name "AI小说生成器_v${{ steps.get-version.outputs.version }}" main.py
+        pyinstaller --onefile --name "AI_Novel_Generator_v${{ steps.get-version.outputs.version }}" main.py
 
     - name: Build executable (macOS)
       if: matrix.platform == 'macos'
       run: |
-        pyinstaller --onefile --windowed --name "AI小说生成器_v${{ steps.get-version.outputs.version }}" --icon=resources/icon.icns main.py
+        pyinstaller --onefile --windowed --name "AI_Novel_Generator_v${{ steps.get-version.outputs.version }}" --icon=resources/icon.icns main.py
 
     - name: Create distribution package
       run: |
@@ -109,9 +109,9 @@ jobs:
         
         # Copy executable
         if [ "${{ matrix.platform }}" = "windows" ]; then
-          cp "dist/AI小说生成器_v${{ steps.get-version.outputs.version }}.exe" dist/package/
+          cp "dist/AI_Novel_Generator_v${{ steps.get-version.outputs.version }}.exe" dist/package/
         else
-          cp "dist/AI小说生成器_v${{ steps.get-version.outputs.version }}" dist/package/
+          cp "dist/AI_Novel_Generator_v${{ steps.get-version.outputs.version }}" dist/package/
         fi
         
         # Copy essential directories
@@ -152,9 +152,9 @@ jobs:
         # Windows launcher
         if [ "${{ matrix.platform }}" = "windows" ]; then
           echo @echo off > run.bat
-          echo echo AI小说生成器启动器 >> run.bat
+          echo echo AI Novel Generator Launcher >> run.bat
           echo echo ======================== >> run.bat
-          echo AI小说生成器_v${{ steps.get-version.outputs.version }}.exe >> run.bat
+          echo AI_Novel_Generator_v${{ steps.get-version.outputs.version }}.exe >> run.bat
           echo pause >> run.bat
         fi
         
@@ -162,9 +162,9 @@ jobs:
         if [ "${{ matrix.platform }}" = "linux" ]; then
           cat > run.sh << 'EOF'
         #!/bin/bash
-        echo "AI小说生成器启动器"
-        echo "=================="
-        ./AI小说生成器_v${{ steps.get-version.outputs.version }}
+        echo "AI Novel Generator Launcher"
+        echo "==========================="
+        ./AI_Novel_Generator_v${{ steps.get-version.outputs.version }}
           EOF
           chmod +x run.sh
         fi
@@ -173,9 +173,9 @@ jobs:
         if [ "${{ matrix.platform }}" = "macos" ]; then
           cat > run.command << 'EOF'
         #!/bin/bash
-        echo "AI小说生成器启动器"
-        echo "=================="
-        ./AI小说生成器_v${{ steps.get-version.outputs.version }}
+        echo "AI Novel Generator Launcher"
+        echo "==========================="
+        ./AI_Novel_Generator_v${{ steps.get-version.outputs.version }}
           EOF
           chmod +x run.command
         fi
@@ -185,11 +185,11 @@ jobs:
         cd dist/package
         
         if [ "${{ matrix.platform }}" = "windows" ]; then
-          7z a -tzip "../AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.zip" *
+          7z a -tzip "../AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.zip" *
         elif [ "${{ matrix.platform }}" = "macos" ]; then
-          zip -r "../AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.zip" *
+          zip -r "../AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.zip" *
         else
-          tar -czf "../AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.tar.gz" *
+          tar -czf "../AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.tar.gz" *
         fi
 
     - name: Create build info
@@ -209,9 +209,9 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}
+        name: AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}
         path: |
-          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.*
+          dist/AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.*
           dist/build_info_${{ matrix.platform }}.txt
         retention-days: 30
 
@@ -220,9 +220,9 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_windows.zip
-          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_linux.tar.gz
-          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_macos.zip
+          dist/AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_windows.zip
+          dist/AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_linux.tar.gz
+          dist/AI_Novel_Generator_v${{ steps.get-version.outputs.version }}_macos.zip
           dist/build_info_*.txt
         draft: false
         prerelease: contains(github.ref, 'beta')

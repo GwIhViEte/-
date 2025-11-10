@@ -44,13 +44,13 @@ pip install aiohttp pillow  # 额外打包依赖
 ### 3. 可执行文件构建
 ```bash
 # Windows
-pyinstaller --onefile --windowed --name "AI小说生成器_v5.0.0" --icon=resources/icon.ico main.py
+pyinstaller --onefile --windowed --name "AI_Novel_Generator_v5.0.0" --icon=resources/icon.ico main.py
 
 # Linux  
-pyinstaller --onefile --name "AI小说生成器_v5.0.0" main.py
+pyinstaller --onefile --name "AI_Novel_Generator_v5.0.0" main.py
 
 # macOS
-pyinstaller --onefile --windowed --name "AI小说生成器_v5.0.0" --icon=resources/icon.icns main.py
+pyinstaller --onefile --windowed --name "AI_Novel_Generator_v5.0.0" --icon=resources/icon.icns main.py
 ```
 
 ### 4. 打包内容
@@ -72,8 +72,8 @@ pyinstaller --onefile --windowed --name "AI小说生成器_v5.0.0" --icon=resour
 
 ### Windows
 ```
-AI小说生成器_v5.0.0_windows.zip
-├── AI小说生成器_v5.0.0.exe
+AI_Novel_Generator_v5.0.0_windows.zip
+├── AI_Novel_Generator_v5.0.0.exe
 ├── run.bat                    # 启动脚本
 ├── core/                      # 核心模块
 ├── utils/                     # 工具模块
@@ -86,8 +86,8 @@ AI小说生成器_v5.0.0_windows.zip
 
 ### Linux
 ```
-AI小说生成器_v5.0.0_linux.tar.gz
-├── AI小说生成器_v5.0.0      # 可执行文件
+AI_Novel_Generator_v5.0.0_linux.tar.gz
+├── AI_Novel_Generator_v5.0.0      # 可执行文件
 ├── run.sh                     # 启动脚本
 ├── core/                      # 核心模块
 ├── utils/                     # 工具模块
@@ -100,8 +100,8 @@ AI小说生成器_v5.0.0_linux.tar.gz
 
 ### macOS
 ```
-AI小说生成器_v5.0.0_macos.zip
-├── AI小说生成器_v5.0.0      # 可执行文件
+AI_Novel_Generator_v5.0.0_macos.zip
+├── AI_Novel_Generator_v5.0.0      # 可执行文件
 ├── run.command                 # 启动脚本
 ├── core/                      # 核心模块
 ├── utils/                     # 工具模块

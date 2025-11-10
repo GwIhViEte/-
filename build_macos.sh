@@ -1,9 +1,9 @@
 #!/bin/bash
-# AI小说生成器 - macOS自动构建脚本
+# AI_Novel_Generator - macOS自动构建脚本
 # 此脚本用于本地构建macOS可执行文件
 
 echo "========================================"
-echo "AI小说生成器 - macOS构建脚本"
+echo "AI_Novel_Generator - macOS构建脚本"
 echo "========================================"
 echo
 
@@ -49,7 +49,7 @@ echo
 python build_config.py
 
 # 执行PyInstaller构建
-pyinstaller --onefile --windowed --name "AI小说生成器_v5.0.0" --icon=resources/icon.icns main.py
+pyinstaller --onefile --windowed --name "AI_Novel_Generator_v5.0.0" --icon=resources/icon.icns main.py
 
 if [ $? -ne 0 ]; then
     echo "构建失败！"
@@ -64,7 +64,7 @@ echo
 mkdir -p dist/release
 
 # 复制文件到发布目录
-cp "dist/AI小说生成器_v5.0.0" "dist/release/"
+cp "dist/AI_Novel_Generator_v5.0.0" "dist/release/"
 cp main.py "dist/release/"
 cp main_wrapper.py "dist/release/"
 cp README*.md "dist/release/"
@@ -81,9 +81,9 @@ cp -r example_prompts "dist/release/" 2>/dev/null || true
 # 创建启动脚本
 cat > "dist/release/run.command" << 'EOF'
 #!/bin/bash
-echo "AI小说生成器启动器"
-echo "=================="
-./AI小说生成器_v5.0.0
+echo "AI Novel Generator Launcher"
+echo "==========================="
+./AI_Novel_Generator_v5.0.0
 EOF
 
 chmod +x "dist/release/run.command"
@@ -103,7 +103,7 @@ echo "正在创建ZIP压缩包..."
 echo
 
 cd dist/release
-zip -r "../AI小说生成器_v5.0.0_macos.zip" *
+zip -r "../AI_Novel_Generator_v5.0.0_macos.zip" *
 
 cd ../..
 
@@ -112,8 +112,8 @@ echo "========================================"
 echo "构建完成！"
 echo "========================================"
 echo
-echo "可执行文件: dist/AI小说生成器_v5.0.0"
-echo "发布包: dist/AI小说生成器_v5.0.0_macos.zip"
+echo "可执行文件: dist/AI_Novel_Generator_v5.0.0"
+echo "发布包: dist/AI_Novel_Generator_v5.0.0_macos.zip"
 echo "发布目录: dist/release/"
 echo
 
