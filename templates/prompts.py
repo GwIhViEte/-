@@ -1,5 +1,7 @@
+# fmt: off
+# flake8: noqa
 # 版本信息
-__version__ = "5.0.5"
+__version__ = "5.0.6"
 __author__ = "GwIhViEte"
 
 
