@@ -119,7 +119,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: AI_Novel_Generator_macos
+        name: AI_Novel_Generator_macos_py${{ matrix.python-version }}
         path: |
           dist/AI_Novel_Generator
           dist/AI_Novel_Generator_macos.zip

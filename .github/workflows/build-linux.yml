@@ -131,7 +131,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: AI_Novel_Generator_linux
+        name: AI_Novel_Generator_linux_py${{ matrix.python-version }}
         path: |
           dist/AI_Novel_Generator
           dist/AI_Novel_Generator_linux.tar.gz
