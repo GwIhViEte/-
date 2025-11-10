@@ -73,8 +73,8 @@ def run_interactive_mode(interface: SanQianLiuInterface) -> None:
     """运行交互模式"""
     while True:
         print("\n==== 小说生成器 ====")
-        print("API充值地址: aiapi.space")
-        print("作者博客: 147227.xyz")
+        print("API充值地址: api.gwihviete.xyz")
+        
         print("1. 初始化生成器")
         print("2. 生成小说大纲")
         print("3. 生成角色系统")

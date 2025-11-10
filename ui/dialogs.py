@@ -9,20 +9,27 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(os.path.dirname(current_dir))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-
-# 尝试使用相对导入（作为模块导入时）或使用绝对导入（直接运行时）
+# 导入路径兼容：相对、包名、目录直导、模块直导
 try:
     from ..templates.prompts import GENRE_SPECIFIC_PROMPTS, MODEL_DESCRIPTIONS, __version__, __author__
     from ..utils.config import save_config
-except ImportError:
-    from novel_generator.templates.prompts import GENRE_SPECIFIC_PROMPTS, MODEL_DESCRIPTIONS, __version__, __author__
-    from novel_generator.utils.config import save_config
-
+except Exception:
+    try:
+        from novel_generator.templates.prompts import GENRE_SPECIFIC_PROMPTS, MODEL_DESCRIPTIONS, __version__, __author__
+        from novel_generator.utils.config import save_config
+    except Exception:
+        try:
+            from templates.prompts import GENRE_SPECIFIC_PROMPTS, MODEL_DESCRIPTIONS, __version__, __author__
+            from utils.config import save_config
+        except Exception:
+            from prompts import GENRE_SPECIFIC_PROMPTS, MODEL_DESCRIPTIONS, __version__, __author__
+            from config import save_config
 class AdvancedSettingsDialog(tk.Toplevel):
     """高级设置对话框"""
     def __init__(self, parent, temperature=0.7, top_p=0.9, max_tokens=8000, context_length=240000, 
                  autosave_interval=60, auto_summary=True, auto_summary_interval=10000, language="中文",
-                 creativity=0.7, formality=0.5, detail_level=0.6, writing_style="平衡"):
+                 creativity=0.7, formality=0.5, detail_level=0.6, writing_style="平衡",
+                 paragraph_length_preference="适中", dialogue_frequency="适中"):
         super().__init__(parent)
         self.parent = parent
         self.title("高级设置")
@@ -48,6 +55,10 @@ class AdvancedSettingsDialog(tk.Toplevel):
         self.formality = tk.DoubleVar(value=formality)
         self.detail_level = tk.DoubleVar(value=detail_level)
         self.writing_style = tk.StringVar(value=writing_style)
+        
+        # 添加排版选项变量
+        self.paragraph_length_preference = tk.StringVar(value=paragraph_length_preference)
+        self.dialogue_frequency = tk.StringVar(value=dialogue_frequency)
         
         self.result = None
         self.create_widgets()
@@ -207,17 +218,15 @@ class AdvancedSettingsDialog(tk.Toplevel):
         
         # 段落长度选项
         ttk.Label(layout_frame, text="段落长度倾向:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        paragraph_style = ttk.Combobox(layout_frame, width=20)
-        paragraph_style['values'] = ["适中", "短小精悍", "较长段落"]
-        paragraph_style.current(0)
-        paragraph_style.grid(row=0, column=1, sticky="w", padx=5, pady=5)
+        self.paragraph_style = ttk.Combobox(layout_frame, width=20, textvariable=self.paragraph_length_preference)
+        self.paragraph_style['values'] = ["适中", "短小精悍", "较长段落"]
+        self.paragraph_style.grid(row=0, column=1, sticky="w", padx=5, pady=5)
         
         # 对话频率选项
         ttk.Label(layout_frame, text="对话频率:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-        dialogue_style = ttk.Combobox(layout_frame, width=20)
-        dialogue_style['values'] = ["适中", "对话较少", "对话较多"]
-        dialogue_style.current(0)
-        dialogue_style.grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        self.dialogue_style = ttk.Combobox(layout_frame, width=20, textvariable=self.dialogue_frequency)
+        self.dialogue_style['values'] = ["适中", "对话较少", "对话较多"]
+        self.dialogue_style.grid(row=1, column=1, sticky="w", padx=5, pady=5)
         
         # 创建底部按钮区域（放在主窗口而非滚动区域内）
         button_frame = ttk.Frame(self)
@@ -286,6 +295,10 @@ class AdvancedSettingsDialog(tk.Toplevel):
         self.detail_level.set(0.6)
         self.writing_style.set("平衡")
         
+        # 重置排版选项
+        self.paragraph_length_preference.set("适中")
+        self.dialogue_frequency.set("适中")
+        
         # 更新所有显示
         self.update_value_label('temperature')
         self.update_value_label('top_p')
@@ -312,7 +325,10 @@ class AdvancedSettingsDialog(tk.Toplevel):
             "creativity": self.creativity.get(),
             "formality": self.formality.get(),
             "detail_level": self.detail_level.get(),
-            "writing_style": self.writing_style.get()
+            "writing_style": self.writing_style.get(),
+            # 添加排版选项
+            "paragraph_length_preference": self.paragraph_length_preference.get(),
+            "dialogue_frequency": self.dialogue_frequency.get()
         }
         self.destroy_safely()
         
@@ -398,9 +414,9 @@ class AboutDialog(tk.Toplevel):
         api_link_label = ttk.Label(links_frame, text="API充值地址: ")
         api_link_label.pack(side=tk.LEFT, padx=(0, 2))
         
-        api_link = tk.Label(links_frame, text="aiapi.space", fg="blue", cursor="hand2")
+        api_link = tk.Label(links_frame, text="api.gwihviete.xyz", fg="blue", cursor="hand2")
         api_link.pack(side=tk.LEFT)
-        api_link.bind("<Button-1>", lambda e: self.open_link("https://aiapi.space"))
+        api_link.bind("<Button-1>", lambda e: self.open_link("https://api.gwihviete.xyz"))
         api_link.bind("<Enter>", lambda e: api_link.config(font=("Arial", 9, "underline")))
         api_link.bind("<Leave>", lambda e: api_link.config(font=("Arial", 9)))
         
@@ -455,7 +471,7 @@ class WelcomeDialog(tk.Toplevel):
         frame = ttk.Frame(self, padding="20")
         frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(frame, text="欢迎使用AI小说生成器", font=("Arial", 16, "bold")).pack(pady=10)
+        ttk.Label(frame, text="欢迎使用", font=("Arial", 16, "bold")).pack(pady=10)
         
         ttk.Label(frame, text="请输入您的API密钥继续使用:", font=("Arial", 11)).pack(pady=20)
         
@@ -476,7 +492,7 @@ class WelcomeDialog(tk.Toplevel):
         ttk.Label(link_frame, text="如果您还没有API密钥，请点击这里获取: ").pack(side=tk.LEFT)
         
         # 创建链接标签
-        link_label = tk.Label(link_frame, text="aiapi.space", fg="blue", cursor="hand2")
+        link_label = tk.Label(link_frame, text="api.gwihviete.xyz", fg="blue", cursor="hand2")
         link_label.pack(side=tk.LEFT)
         
         # 创建鼠标悬停效果
@@ -488,7 +504,7 @@ class WelcomeDialog(tk.Toplevel):
             
         def on_click(e):
             import webbrowser
-            webbrowser.open("https://aiapi.space")
+            webbrowser.open("https://api.gwihviete.xyz")
         
         link_label.bind("<Enter>", on_enter)
         link_label.bind("<Leave>", on_leave)

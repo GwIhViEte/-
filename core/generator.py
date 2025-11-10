@@ -30,10 +30,10 @@ try:
     from ..utils.common import get_output_dir, get_timestamp
     from .media_generator import MediaGenerator
 except ImportError:
-    from novel_generator.templates.prompts import PROMPT_TEMPLATES, ENDING_PROMPTS, GENRE_SPECIFIC_PROMPTS, NOVEL_TYPES, __version__
-    from novel_generator.utils.config import save_config, load_config
-    from novel_generator.utils.common import get_output_dir, get_timestamp
-    from novel_generator.core.media_generator import MediaGenerator
+    from templates.prompts import PROMPT_TEMPLATES, ENDING_PROMPTS, GENRE_SPECIFIC_PROMPTS, NOVEL_TYPES, __version__
+    from utils.config import save_config, load_config
+    from utils.common import get_output_dir, get_timestamp
+    from core.media_generator import MediaGenerator
 
 # 设置日志
 logger = logging.getLogger("novel_generator")
@@ -43,7 +43,8 @@ if not '__version__' in globals():
     __version__ = "3.6.0"
 
 class NovelGenerator:
-    def __init__(self, api_key: str, model: str = "gpt-4.5-preview",
+    def __init__(self, api_key: str, model: str = "gpt-4.1",
+                 base_url: Optional[str] = None,
                  max_workers: int = 3, language: str = "中文",
                  novel_type: str = "奇幻冒险",
                  custom_prompt: Optional[str] = None,
@@ -65,7 +66,14 @@ class NovelGenerator:
                  auto_summary_interval: int = 10000,
                  generate_cover: bool = False,
                  generate_music: bool = False,
-                 num_cover_images: int = 1):
+                 num_cover_images: int = 1,
+                 paragraph_length_preference: str = "适中",
+                 dialogue_frequency: str = "适中",
+                 ending_trigger_ratio: float = 0.90,
+                 ending_stop_overrun_ratio: float = 1.02,
+                 ending_stop_attempts: int = 3,
+                 ending_stop_min_ratio: float = 0.98,
+                 ending_marker_stop: bool = True):
         
         # 初始化属性...
         self.api_key = api_key
@@ -93,9 +101,16 @@ class NovelGenerator:
         self.generate_cover = generate_cover
         self.generate_music = generate_music
         self.num_cover_images = num_cover_images
+        # 排版偏好
+        self.paragraph_length_preference = paragraph_length_preference
+        self.dialogue_frequency = dialogue_frequency
         
         # API相关
-        self.base_url = "https://aiapi.space/v1/chat/completions"
+        if base_url:
+            self.base_url = base_url
+        else:
+            self.base_url = "https://api.openai.com/v1/chat/completions"
+        
         self.session = None
         self.existing_content = {}
         
@@ -748,6 +763,108 @@ class NovelGenerator:
                 self.update_status(f"替换占位符 {placeholder} 时出错: {e}")
             return text
     
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        估算文本的token数量
+        中文：1个字符约等于1.5个token
+        英文：1个字符约等于0.25个token（4个字符约1个token）
+        """
+        if not text:
+            return 0
+            
+        chinese_chars = len([c for c in text if '\u4e00' <= c <= '\u9fff'])
+        english_chars = len(text) - chinese_chars
+        
+        estimated_tokens = int(chinese_chars * 1.5 + english_chars * 0.25)
+        return estimated_tokens
+    
+    def _smart_context_truncate(self, text: str, max_tokens: int) -> str:
+        """
+        智能截取上下文，确保不超过token限制
+        """
+        if not text:
+            return ""
+            
+        estimated_tokens = self._estimate_tokens(text)
+        
+        if estimated_tokens <= max_tokens:
+            return text
+            
+        # 需要截取，按比例估算需要保留的字符数
+        target_ratio = max_tokens / estimated_tokens
+        target_chars = int(len(text) * target_ratio * 0.9)  # 留10%的安全边界
+        
+        # 从末尾开始截取
+        truncated_text = text[-target_chars:] if target_chars > 0 else text[-1000:]
+        
+        # 尝试找到第一个完整段落的开始
+        first_paragraph_start = truncated_text.find('\n\n')
+        if first_paragraph_start != -1 and first_paragraph_start < len(truncated_text) // 2:
+            truncated_text = truncated_text[first_paragraph_start + 2:]
+        
+        return truncated_text
+    
+    def _handle_async_error(self, error: Exception, operation: str, attempt: int = 0, max_retries: int = 3) -> bool:
+        """
+        统一的异步错误处理函数
+        返回True表示可以重试，False表示应该停止
+        """
+        error_type = type(error).__name__
+        error_msg = str(error)
+        
+        self.update_status(f"{operation}时发生{error_type}错误: {error_msg}")
+        
+        # 网络相关错误 - 可重试
+        if isinstance(error, (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError)):
+            if "timeout" in error_msg.lower() or isinstance(error, asyncio.TimeoutError):
+                self.update_status(f"请求超时，这通常是由于长文本生成耗时较长导致的")
+                
+            if attempt < max_retries:
+                retry_delay = min(5 * (2 ** attempt), 30)  # 指数退避，最大30秒
+                self.update_status(f"网络错误可重试，将在{retry_delay}秒后重试 (尝试{attempt + 1}/{max_retries})")
+                return True
+            else:
+                self.update_status(f"网络错误重试{max_retries}次后仍然失败，停止重试")
+                return False
+        
+        # SSL错误 - 可重试但需要重建连接
+        if isinstance(error, ssl.SSLError):
+            if attempt < max_retries:
+                self.update_status("SSL连接错误，将重新建立安全连接")
+                # 强制重建session
+                if hasattr(self, 'session') and self.session:
+                    try:
+                        asyncio.create_task(self._recreate_session())
+                    except Exception:
+                        pass
+                return True
+            return False
+        
+        # 任务取消错误 - 用户操作导致
+        if isinstance(error, asyncio.CancelledError):
+            self.update_status("任务被用户取消")
+            return False
+            
+        # 内存错误 - 不可重试，需要优化
+        if isinstance(error, MemoryError):
+            self.update_status("内存不足，建议减少并发数量或目标字数")
+            return False
+            
+        # JSON解析错误 - API返回格式问题，可重试
+        if "json" in error_msg.lower() or "decode" in error_msg.lower():
+            if attempt < max_retries:
+                self.update_status("API响应格式异常，可能是临时问题，将重试")
+                return True
+            return False
+            
+        # 其他未知错误 - 谨慎重试
+        if attempt < max_retries // 2:  # 只重试一半次数
+            self.update_status(f"未知错误，尝试重试 ({attempt + 1}/{max_retries // 2})")
+            return True
+            
+        self.update_status(f"无法处理的错误类型: {error_type}，停止操作")
+        return False
+    
     def get_prompt(self, novel_setup, current_text="", create_ending=False):
         """根据小说设定和当前内容生成提示词"""
         # 获取语言
@@ -911,6 +1028,21 @@ class NovelGenerator:
             # 英文生成指导
             if create_ending:
                 base_prompt += "\n\nImportant: Please create a satisfying ending for the novel, wrapping up all major plot points and character arcs."
+                
+                # 为结局生成添加上下文信息
+                if latest_summary:
+                    base_prompt += f"\n\n--- Latest Story Summary ---\n{latest_summary}\n--- End Summary ---\n\n"
+                
+                # 添加当前文本内容（如果有）
+                if current_text:
+                    # 智能截取末尾部分作为上下文，确保不超过token限制
+                    max_context_tokens = int(self.context_length * 0.4)  # 为结局生成留更多空间给摘要
+                    truncated_text = self._smart_context_truncate(current_text, max_context_tokens)
+                    
+                    base_prompt += f"\nExisting content (recent part):\n{truncated_text}\n\n"
+                    base_prompt += "Based on the above summary and existing content, please write a compelling ending that provides satisfying closure to all story elements:"
+                else:
+                    base_prompt += "\nPlease create an engaging ending for the story:"
             else:
                 base_prompt += "\n\nImportant guidelines:\n"
                 base_prompt += "1. Write in a creative, engaging and professional style, suitable for a novel\n"
@@ -931,15 +1063,11 @@ class NovelGenerator:
                 
                 # 添加当前文本内容（如果有）
                 if current_text:
-                    # 截取末尾部分作为上下文
-                    context_len_chars = int(self.context_length * 0.75) # 稍微缩短末尾上下文长度，给摘要留空间
-                    truncated_text = current_text[-min(context_len_chars, len(current_text)):]
-                    # 尝试找到第一个完整段落的开始
-                    first_paragraph_start = truncated_text.find('\n\n')
-                    if first_paragraph_start != -1:
-                        truncated_text = truncated_text[first_paragraph_start + 2:] # 从第一个完整段落开始
+                    # 智能截取末尾部分作为上下文，确保不超过token限制
+                    max_context_tokens = int(self.context_length * 0.5)  # 普通续写留50%空间给上下文
+                    truncated_text = self._smart_context_truncate(current_text, max_context_tokens)
                         
-                        base_prompt += f"\nExisting content (last part):\n{truncated_text}\n\n"
+                    base_prompt += f"\nExisting content (last part):\n{truncated_text}\n\n"
                     # 修改续写提示，强调结合摘要和最新内容
                     base_prompt += "Please analyze the above summary (if provided) and the existing content, understand the story's development, and then creatively continue writing. Do not repeat or summarize existing content. Continue with the next plot point, ensuring the plot development is novel and interesting:"
                         
@@ -959,6 +1087,21 @@ class NovelGenerator:
             
             if create_ending:
                  base_prompt += "\n\n重要：请为小说创作一个令人满意的结局，收束所有主要情节线和人物弧光。"
+                 
+                 # 为结局生成添加上下文信息
+                 if latest_summary:
+                     base_prompt += f"\n\n--- 最新故事摘要 ---\n{latest_summary}\n--- 摘要结束 ---\n\n"
+                 
+                 # 添加当前文本内容（如果有）
+                 if current_text:
+                     # 智能截取末尾部分作为上下文，确保不超过token限制
+                     max_context_tokens = int(self.context_length * 0.4)  # 为结局生成留更多空间给摘要
+                     truncated_text = self._smart_context_truncate(current_text, max_context_tokens)
+                     
+                     base_prompt += f"\n已有内容（最近部分）:\n{truncated_text}\n\n"
+                     base_prompt += "基于以上摘要和已有内容，请创作一个引人入胜的结局，为所有故事元素提供令人满意的收束："
+                 else:
+                     base_prompt += "\n请为故事创作一个引人入胜的结局："
             else:
                 base_prompt += "\n\n重要写作要求:\n"
                 base_prompt += "1. 风格要求：创作风格要求有创意、引人入胜、专业，适合小说阅读。\n"
@@ -979,13 +1122,9 @@ class NovelGenerator:
                 
                 # 添加当前文本内容（如果有）
                 if current_text:
-                    # 截取末尾部分作为上下文
-                    context_len_chars = int(self.context_length * 0.75) # 稍微缩短末尾上下文长度
-                    truncated_text = current_text[-min(context_len_chars, len(current_text)):]
-                     # 尝试找到第一个完整段落的开始
-                    first_paragraph_start = truncated_text.find('\n\n')
-                    if first_paragraph_start != -1:
-                        truncated_text = truncated_text[first_paragraph_start + 2:]
+                    # 智能截取末尾部分作为上下文，确保不超过token限制
+                    max_context_tokens = int(self.context_length * 0.5)  # 普通续写留50%空间给上下文
+                    truncated_text = self._smart_context_truncate(current_text, max_context_tokens)
 
                     base_prompt += f"\n已有内容（最近部分）:\n{truncated_text}\n\n"
                     # 修改续写提示，强调结合摘要和最新内容
@@ -1009,7 +1148,47 @@ class NovelGenerator:
             length_guidance = "\n\n【重要要求】：\n1. 请生成至少800字的详细内容\n2. 包含丰富的情节发展、人物对话和场景描写\n3. 确保故事引人入胜，节奏合理\n4. 使用生动的描写和自然的对话\n5. 避免过于简短或草率的描述"
         
         base_prompt += length_guidance
-                
+
+        # 根据排版偏好追加风格指引
+        try:
+            dlg_pref = getattr(self, 'dialogue_frequency', '适中') or '适中'
+            para_pref = getattr(self, 'paragraph_length_preference', '适中') or '适中'
+
+            if is_english:
+                extra = []
+                if dlg_pref == '对话较多':
+                    extra.append("Increase dialogue proportion; use conversations to drive scenes. Ensure dialogues are informative, natural, and avoid empty chit-chat.")
+                elif dlg_pref == '对话较少':
+                    extra.append("Reduce dialogue proportion; prefer narration and description to advance the plot.")
+
+                if para_pref == '短小精悍':
+                    extra.append("Prefer short paragraphs (2–4 sentences per paragraph) for readability.")
+                elif para_pref == '较长段落':
+                    extra.append("Use longer paragraphs when appropriate (5–8 sentences) to develop details.")
+                else:
+                    extra.append("Keep paragraph length moderate with natural breaks.")
+
+                if extra:
+                    base_prompt += "\n\nLayout & Style Preferences:\n- " + "\n- ".join(extra)
+            else:
+                extra_cn = []
+                if dlg_pref == '对话较多':
+                    extra_cn.append("提高对话占比：用人物对话推进场景，确保对话自然、有信息量，避免空泛寒暄。")
+                elif dlg_pref == '对话较少':
+                    extra_cn.append("降低对话占比：更多通过叙述与描写推动情节。")
+
+                if para_pref == '短小精悍':
+                    extra_cn.append("段落尽量短小精悍：每段以2–4句为宜，增强可读性。")
+                elif para_pref == '较长段落':
+                    extra_cn.append("适当使用较长段落：每段可展开5–8句细节描写。")
+                else:
+                    extra_cn.append("保持段落长度适中，自然换段。")
+
+                if extra_cn:
+                    base_prompt += "\n\n【排版与风格】\n- " + "\n- ".join(extra_cn)
+        except Exception:
+            pass
+
         return base_prompt
     
     async def generate_novel_content(self, novel_setup):
@@ -1017,13 +1196,36 @@ class NovelGenerator:
         try:
             # 确保基本属性初始化
             if not hasattr(self, 'session') or not self.session:
-                self.session = aiohttp.ClientSession()
+                # 根据文本长度动态调整超时时间
+                current_text = self.existing_content.get(novel_setup.get("id", "default"), "")
+                text_length = len(current_text)
+                
+                # 动态超时计算：基础300秒 + 每10万字增加60秒
+                base_timeout = 300  # 5分钟基础超时
+                if text_length > 100000:  # 超过10万字
+                    extra_timeout = (text_length // 100000) * 60  # 每10万字加1分钟
+                    dynamic_timeout = min(base_timeout + extra_timeout, 900)  # 最大15分钟
+                else:
+                    dynamic_timeout = base_timeout
+                
+                self.update_status(f"设置动态超时时间: {dynamic_timeout}秒 (当前文本长度: {text_length}字)")
+                
+                self.session = aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=dynamic_timeout),
+                    connector=aiohttp.TCPConnector(
+                        ssl=False,
+                        limit=10,
+                        limit_per_host=5,
+                        enable_cleanup_closed=True,
+                        # 增加连接保持时间，减少重连开销
+                        keepalive_timeout=60,
+                        ttl_dns_cache=300
+                    )
+                )
                 
             if not hasattr(self, 'base_url'):
-                self.base_url = "https://aiapi.space/v1/chat/completions"
-            elif self.base_url != "https://aiapi.space/v1/chat/completions":
-                # 确保始终使用正确的API URL
-                self.base_url = "https://aiapi.space/v1/chat/completions"
+                self.base_url = "https://api.openai.com/v1/chat/completions"
+           
                 
             # 确保existing_content是字典类型
             if not hasattr(self, 'existing_content'):
@@ -1063,7 +1265,9 @@ class NovelGenerator:
             cleaning_interval = 5000
             
             # 添加结尾生成状态跟踪
-            ending_generated = False
+            ending_generated = False  # 真正满足收束条件后才置为 True
+            ending_mode = False       # 达到阈值后进入结尾阶段
+            ending_attempts = 0       # 结尾段尝试计数
             
             while (len(current_text) < threshold and 
                   not self.stop_event.is_set() and 
@@ -1085,9 +1289,26 @@ class NovelGenerator:
                     
                     # 检查会话状态
                     if self.session is None or self.session.closed:
+                        # 计算动态超时时间
+                        current_text = self.existing_content.get(novel_setup.get("id", "default"), "")
+                        text_length = len(current_text)
+                        base_timeout = 300  # 5分钟基础超时
+                        if text_length > 100000:  # 超过10万字
+                            extra_timeout = (text_length // 100000) * 60  # 每10万字加1分钟
+                            dynamic_timeout = min(base_timeout + extra_timeout, 900)  # 最大15分钟
+                        else:
+                            dynamic_timeout = base_timeout
+                            
                         self.session = aiohttp.ClientSession(
-                            timeout=aiohttp.ClientTimeout(total=120),
-                            connector=aiohttp.TCPConnector(ssl=False)
+                            timeout=aiohttp.ClientTimeout(total=dynamic_timeout),
+                            connector=aiohttp.TCPConnector(
+                                ssl=False,
+                                limit=10,
+                                limit_per_host=5,
+                                        enable_cleanup_closed=True,
+                                keepalive_timeout=60,
+                                ttl_dns_cache=300
+                            )
                         )
                         self.update_status("已重新创建API会话")
                     
@@ -1140,10 +1361,11 @@ class NovelGenerator:
                         
                         last_cleaning_check = len(current_text)
                 
-                # 检查是否需要生成结尾
-                should_create_ending = (self.create_ending and 
-                                      len(current_text) >= novel_setup["target_length"] * 0.9 and 
-                                      not ending_generated)
+                # 检查是否进入/继续结尾阶段
+                if self.create_ending and len(current_text) >= novel_setup["target_length"] * getattr(self, 'ending_trigger_ratio', 0.9):
+                    ending_mode = True
+                # 在进入结尾阶段但尚未满足收束条件时，持续引导模型生成结尾
+                should_create_ending = (ending_mode and not ending_generated)
                 
                 prompt = self.get_prompt(novel_setup, current_text, should_create_ending)
                 
@@ -1197,10 +1419,10 @@ class NovelGenerator:
                             if retry_content and len(retry_content) > 10:
                                 content = self._clean_content(retry_content)
                     
-                    # 如果刚才生成的是结尾，标记结尾已生成
+                    # 如果处于结尾阶段，记录一次结尾尝试，不立即停止
                     if should_create_ending:
-                        ending_generated = True
-                        self.update_status("小说结尾已生成")
+                        ending_attempts += 1
+                        self.update_status(f"结尾段已生成（第 {ending_attempts} 段）")
                 
                     # 智能合并内容
                     current_text = self._smart_join_content(current_text, content)
@@ -1210,10 +1432,24 @@ class NovelGenerator:
                     novel_setup["word_count"] = len(current_text)
                     novel_setup["content"] = current_text
                     
-                    # 如果已经生成了结尾，强制退出循环
-                    if ending_generated:
-                        self.update_status("小说结尾生成完成，停止生成")
-                        break
+                    # 结尾收束判定：达到目标长度一定冗余，或多段结尾后基本达标，或检测到结尾关键词
+                    if ending_mode:
+                        wc = novel_setup["word_count"]
+                        target = novel_setup["target_length"]
+                        content_lower = content.lower()
+                        has_end_marker = any(k in content for k in ["（完）", "全书完", "完结", "终章"]) or any(k in content_lower for k in ["the end", "epilogue"]) 
+
+                        overrun_ratio = getattr(self, 'ending_stop_overrun_ratio', 1.02)
+                        min_ratio = getattr(self, 'ending_stop_min_ratio', 0.98)
+                        attempts_need = getattr(self, 'ending_stop_attempts', 3)
+                        marker_stop = getattr(self, 'ending_marker_stop', True)
+
+                        if (wc >= int(target * overrun_ratio)) or \
+                           (ending_attempts >= attempts_need and wc >= int(target * min_ratio)) or \
+                           (marker_stop and has_end_marker):
+                            ending_generated = True
+                            self.update_status("小说结尾生成完成，停止生成")
+                            break
 
                     # 计算进度
                     progress = min(100.0, (len(current_text) / novel_setup["target_length"]) * 100)
@@ -1952,26 +2188,79 @@ class NovelGenerator:
     def _sync_close_session(self):
         """同步方法，用于在单独线程中关闭会话"""
         try:
-            # 创建新的事件循环
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # 在新循环中关闭会话
-            loop.run_until_complete(self._safe_close_session())
-            loop.close()
+            if hasattr(self, 'session') and self.session and not self.session.closed:
+                # 检查是否在当前线程有运行中的事件循环
+                try:
+                    # 尝试获取当前事件循环
+                    current_loop = asyncio.get_running_loop()
+                    # 如果有运行中的循环，使用call_soon_threadsafe调度关闭任务
+                    if current_loop and not current_loop.is_closed():
+                        # 创建一个Future来等待关闭完成
+                        future = asyncio.run_coroutine_threadsafe(
+                            self._safe_close_session(), current_loop
+                        )
+                        # 等待关闭完成，设置较短超时
+                        future.result(timeout=3.0)
+                        return
+                except (RuntimeError, asyncio.TimeoutError):
+                    # 没有运行中的事件循环，或者超时，继续下面的处理
+                    pass
+                
+                # 如果上面的方法失败，尝试创建新的事件循环
+                try:
+                    # 强制关闭会话，不等待异步操作
+                    if hasattr(self.session, '_connector'):
+                        # 直接关闭连接器，不使用异步方法
+                        connector = self.session._connector
+                        if connector and hasattr(connector, 'close'):
+                            try:
+                                # 同步关闭连接器（如果可能）
+                                if hasattr(connector, '_close'):
+                                    connector._close()
+                            except:
+                                pass
+                    
+                    # 直接设置为None，让垃圾回收器处理
+                    self.session = None
+                    self.update_status("API会话已强制关闭")
+                    
+                except Exception as inner_e:
+                    self.update_status(f"强制关闭会话时出错: {str(inner_e)}")
+                    self.session = None
+            else:
+                # 会话已经关闭或不存在
+                self.session = None
+                
         except Exception as e:
-            self.update_status(f"关闭会话时出错: {str(e)}")
+            self.update_status(f"同步关闭会话时出错: {str(e)}")
+            # 强制设置为None，避免悬空引用
             self.session = None
     
     async def _safe_close_session(self):
         """安全关闭会话的异步方法"""
         if hasattr(self, 'session') and self.session and not self.session.closed:
             try:
-                # 确保关闭所有未完成的请求
-                await self.session.close()
+                # 等待所有待处理的请求完成，设置较短的超时时间
+                if hasattr(self.session, '_connector') and self.session._connector:
+                    # 优雅地等待连接关闭，但不超过2秒
+                    await asyncio.wait_for(
+                        self.session.close(),
+                        timeout=2.0
+                    )
+                else:
+                    # 直接关闭
+                    await self.session.close()
+                    
+                # 额外等待一小段时间确保清理完成
+                await asyncio.sleep(0.1)
                 self.session = None
                 self.update_status("API会话已关闭")
+            except asyncio.TimeoutError:
+                # 超时时强制关闭
+                self.update_status("会话关闭超时，强制关闭")
+                self.session = None
             except Exception as e:
+                # 忽略关闭时的错误，直接设置为None
                 self.update_status(f"关闭会话时出错: {str(e)}")
                 self.session = None
     
@@ -2024,18 +2313,35 @@ class NovelGenerator:
         self.update_status("继续生成")
         
     async def _recreate_session(self):
-        """重新创建API会话"""
+        """重新创建API会话，使用动态超时"""
         try:
             # 确保旧会话关闭
             if hasattr(self, 'session') and self.session and not self.session.closed:
                 await self.session.close()
                 
+            # 计算动态超时（基于当前总文本长度）
+            total_text_length = sum(len(content) for content in self.existing_content.values())
+            base_timeout = 300  # 5分钟基础超时
+            if total_text_length > 100000:  # 超过10万字
+                extra_timeout = (total_text_length // 100000) * 60  # 每10万字加1分钟
+                dynamic_timeout = min(base_timeout + extra_timeout, 900)  # 最大15分钟
+            else:
+                dynamic_timeout = base_timeout
+                
             # 创建新会话
             self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=120),
-                connector=aiohttp.TCPConnector(ssl=False)
+                timeout=aiohttp.ClientTimeout(total=dynamic_timeout),
+                connector=aiohttp.TCPConnector(
+                    ssl=False,
+                    limit=10,
+                    limit_per_host=5,
+                    enable_cleanup_closed=True,
+                    # 增加连接保持时间，减少重连开销
+                    keepalive_timeout=60,
+                    ttl_dns_cache=300
+                )
             )
-            self.update_status("已重新创建API会话")
+            self.update_status(f"已重新创建API会话 (超时设置: {dynamic_timeout}秒)")
         except Exception as e:
             self.update_status(f"重新创建会话时出错: {str(e)}")
             self.session = None
@@ -2115,16 +2421,32 @@ class NovelGenerator:
                 if is_long_text:
                     return await self._generate_long_text_summary(text)
                 
-                # 分段处理普通长文本
+                # 分段处理普通长文本 - 基于token而不是字符
                 segments = []
-                segment_length = self.context_length // 2  # 每段长度为上下文长度的一半
+                max_segment_tokens = self.context_length // 3  # 每段token数为上下文长度的1/3，确保安全
                 
-                for i in range(0, len(text), segment_length):
-                    segment = text[i:i+segment_length]
-                    if len(segment) < 100:  # 跳过过短的段落
-                        continue
+                current_pos = 0
+                while current_pos < len(text):
+                    # 估算从当前位置开始的大概字符数
+                    estimated_chars = int(max_segment_tokens / 1.2)  # 保守估计，假设平均1.2token/字符
+                    segment_end = min(current_pos + estimated_chars, len(text))
                     
-                    segments.append(segment)
+                    # 尝试在段落边界截断
+                    segment_text = text[current_pos:segment_end]
+                    
+                    # 如果不是最后一段，尝试在段落边界结束
+                    if segment_end < len(text):
+                        paragraph_boundary = segment_text.rfind('\n\n')
+                        if paragraph_boundary > len(segment_text) // 2:  # 确保不会截取太短
+                            segment_text = segment_text[:paragraph_boundary]
+                            segment_end = current_pos + paragraph_boundary
+                    
+                    if len(segment_text.strip()) > 100:  # 跳过过短的段落
+                        segments.append(segment_text)
+                        
+                    current_pos = segment_end
+                    if current_pos >= len(text):
+                        break
                     
                 self.update_status(f"将分成{len(segments)}个段落生成摘要")
                 
@@ -2297,65 +2619,47 @@ class NovelGenerator:
             return None
     
     def _save_summary(self, summary, word_count, novel_setup):
-        """保存摘要到文件"""
         try:
-            # 确保使用正确的输出目录
             if hasattr(self, 'main_output_dir') and self.main_output_dir:
                 output_dir = self.main_output_dir
             else:
                 output_dir = self.output_dir
-                
-            # 使用时间戳生成唯一的摘要文件名
             timestamp = int(time.time())
-            if "id" in novel_setup:
-                summary_filename = f"summary_{novel_setup['genre']}_{novel_setup['id']}_{word_count}字.txt"
+            novel_id = novel_setup.get('id')
+            safe_genre = str(novel_setup.get('genre', 'unknown')).replace('/', '_').replace('\\', '_').strip()
+            if novel_id:
+                summary_filename = f"summary_{safe_genre}_{novel_id}_{word_count}.txt"
             else:
-                summary_filename = f"summary_{novel_setup['genre']}_{timestamp}_{word_count}字.txt"
-                
+                summary_filename = f"summary_{safe_genre}_{timestamp}_{word_count}.txt"
             summary_path = os.path.join(output_dir, summary_filename)
-            
-            # 将摘要添加到小说元数据中
             summary_data = {
                 "word_count": word_count,
                 "timestamp": time.time(),
                 "summary": summary,
-                "genre": novel_setup['genre'],
-                "language": novel_setup['language']
+                "genre": novel_setup.get('genre'),
+                "language": novel_setup.get('language')
             }
-            
-            # 保存摘要文本
             with open(summary_path, 'w', encoding='utf-8') as f:
-                f.write(f"=== 小说摘要 ({word_count}字) ===\n")
-                f.write(f"类型: {novel_setup['genre']}\n")
-                f.write(f"生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(f"=== SUMMARY ({word_count} chars) ===\n")
+                f.write(f"Type: {safe_genre}\n")
+                f.write(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 f.write(summary)
-            
-            # 将摘要保存到小说元数据中
             if "summaries" not in novel_setup:
                 novel_setup["summaries"] = []
-                
             novel_setup["summaries"].append(summary_data)
-            
-            # 记录到类属性中
             self.novel_summaries.append(summary_data)
-            
-            # 同时更新一个汇总摘要文件
-            combined_summary_filename = f"summaries_{novel_setup['genre']}.txt"
+            combined_summary_filename = f"summaries_{safe_genre}.txt"
             combined_summary_path = os.path.join(output_dir, combined_summary_filename)
-            
             with open(combined_summary_path, 'a', encoding='utf-8') as f:
-                f.write(f"\n\n=== 小说摘要 ({word_count}字) ===\n")
-                f.write(f"类型: {novel_setup['genre']}\n")
-                f.write(f"生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(f"\n\n=== SUMMARY ({word_count} chars) ===\n")
+                f.write(f"Type: {safe_genre}\n")
+                f.write(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 f.write(summary)
-            
-            self.update_status(f"摘要生成完成")
+            self.update_status("摘要生成完成")
             self.update_status(f"已保存 {word_count} 字小说摘要")
-            
         except Exception as e:
             self.update_status(f"保存摘要失败: {str(e)}")
             traceback.print_exc()
-    
     async def _generate_text(self, prompt):
         """生成文本内容的辅助方法，调用现有的_generate_content方法
         
@@ -2421,21 +2725,45 @@ class NovelGenerator:
                 
                 # 确保会话存在
                 if not self.session or self.session.closed:
+                    # 计算动态超时时间
+                    total_text_length = sum(len(content) for content in self.existing_content.values())
+                    base_timeout = 300  # 5分钟基础超时
+                    if total_text_length > 100000:  # 超过10万字
+                        extra_timeout = (total_text_length // 100000) * 60  # 每10万字加1分钟
+                        dynamic_timeout = min(base_timeout + extra_timeout, 900)  # 最大15分钟
+                    else:
+                        dynamic_timeout = base_timeout
+                        
                     self.session = aiohttp.ClientSession(
-                        timeout=aiohttp.ClientTimeout(total=120),  # 增加超时时间
-                        connector=aiohttp.TCPConnector(ssl=False)  # 禁用SSL验证
+                        timeout=aiohttp.ClientTimeout(total=dynamic_timeout),
+                        connector=aiohttp.TCPConnector(
+                            ssl=False,
+                            limit=10,
+                            limit_per_host=5,
+                                enable_cleanup_closed=True,
+                            keepalive_timeout=60,
+                            ttl_dns_cache=300
+                        )
                     )
                 
                 # 状态通知
                 attempt_msg = "" if attempt == 0 else f" (尝试 {attempt+1}/{max_retries})"
                 self.update_status(f"正在调用AI接口生成内容{attempt_msg}...")
                 
-                # 发送请求
+                # 发送请求（使用与会话一致的动态超时）
+                total_text_length = sum(len(content) for content in self.existing_content.values())
+                base_timeout = 300  # 5分钟基础超时
+                if total_text_length > 100000:  # 超过10万字
+                    extra_timeout = (total_text_length // 100000) * 60  # 每10万字加1分钟
+                    dynamic_timeout = min(base_timeout + extra_timeout, 900)  # 最大15分钟
+                else:
+                    dynamic_timeout = base_timeout
+                
                 async with self.session.post(
                     self.base_url,
                     headers=headers,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=120)
+                    timeout=aiohttp.ClientTimeout(total=dynamic_timeout)
                 ) as response:
                     if response.status == 200:
                         # 成功获取结果
@@ -2522,52 +2850,45 @@ class NovelGenerator:
                                 self.retry_callback()
             
             except (aiohttp.ClientError, asyncio.TimeoutError, ssl.SSLError) as e:
-                # 网络错误处理
-                self.update_status(f"网络错误: {str(e)}")
+                # 使用统一的异步错误处理
+                should_retry = self._handle_async_error(e, "API请求", attempt, max_retries)
                 
-                # 关闭可能已损坏的会话
-                if self.session and not self.session.closed:
-                    try:
-                        await self.session.close()
-                    except Exception:
-                        pass  # 忽略关闭时的错误
-                    finally:
-                        self.session = None
-                
-                if attempt < max_retries - 1:
-                    # 不是最后一次尝试，等待后重试
-                    delay = retry_delay * (1.5 ** min(attempt, 10))  # 与上面相同
-                    self.update_status(f"将在 {int(delay)} 秒后重试连接...")
+                if should_retry and attempt < max_retries - 1:
+                    # 关闭可能已损坏的会话
+                    if self.session and not self.session.closed:
+                        try:
+                            await self.session.close()
+                        except Exception:
+                            pass
+                        finally:
+                            self.session = None
                     
+                    # 智能重试延迟
+                    delay = min(5 * (2 ** min(attempt, 4)), 30)  # 最大30秒
                     # 分段等待，每秒检查一次状态
                     for _ in range(int(delay)):
-                        # 如果停止或暂停，则不再继续重试
                         if not self.running or self.stop_event.is_set():
                             return ""
                         await asyncio.sleep(1)
                 else:
-                    # 最后一次尝试，调用重试回调
+                    # 最后一次尝试失败，调用重试回调
                     if self.retry_callback:
                         self.retry_callback()
             
             except Exception as e:
-                # 其他未预期的错误
-                self.update_status(f"生成内容时出错: {str(e)}")
-                traceback.print_exc()
+                # 使用统一的异步错误处理
+                should_retry = self._handle_async_error(e, "生成内容", attempt, max_retries)
                 
-                if attempt < max_retries - 1:
-                    # 不是最后一次尝试，等待后重试
-                    delay = retry_delay * (1.5 ** min(attempt, 10))  # 与上面相同
-                    self.update_status(f"将在 {int(delay)} 秒后重试...")
-                    
+                if should_retry and attempt < max_retries - 1:
+                    # 智能重试延迟
+                    delay = min(3 * (2 ** min(attempt, 3)), 20)  # 未知错误延迟稍短
                     # 分段等待，每秒检查一次状态
                     for _ in range(int(delay)):
-                        # 如果停止或暂停，则不再继续重试
                         if not self.running or self.stop_event.is_set():
                             return ""
                         await asyncio.sleep(1)
                 else:
-                    # 最后一次尝试，调用重试回调
+                    # 最后一次尝试失败
                     if self.retry_callback:
                         self.retry_callback()
         
@@ -2809,3 +3130,12 @@ class NovelGenerator:
         else:
             # 直接连接，保持段落连续性
             return existing_content + new_content
+
+
+
+
+
+
+
+
+

@@ -238,7 +238,7 @@ python demo_media_generation.py
 5. **易于扩展**: 模块化设计便于后续功能扩展
 
 用户只需要：
-1. 获取有效的API密钥（https://aiapi.space）
+1. 获取有效的API密钥
 2. 在界面中启用相应功能
 3. 开始生成小说即可自动获得配套的封面和音乐
 

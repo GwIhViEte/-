@@ -50,7 +50,7 @@ def demo_media_generation():
     if demo_config["api_key"] == "your_api_key_here":
         print("⚠️  请先设置有效的API密钥")
         print("   在 demo_config['api_key'] 中填入您的API密钥")
-        print("\n🔗 获取API密钥: https://aiapi.space")
+        print("\n🔗 获取API密钥: https://api.gwihviete.xyz")
         return
     
     # 创建输出目录

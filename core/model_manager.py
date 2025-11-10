@@ -2,6 +2,7 @@ import os
 import sys
 import requests
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse, urljoin
 
 # 修复导入问题
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,7 +14,7 @@ if parent_dir not in sys.path:
 try:
     from ..templates.prompts import MODEL_DESCRIPTIONS, SUPPORTED_MODELS
 except ImportError:
-    from novel_generator.templates.prompts import MODEL_DESCRIPTIONS, SUPPORTED_MODELS
+    from templates.prompts import MODEL_DESCRIPTIONS, SUPPORTED_MODELS
 
 def get_model_list(api_key=None):
     """获取可用模型列表"""
@@ -46,4 +47,47 @@ def check_api_key_validity(api_key: str) -> bool:
     """检查API密钥是否有效"""
     # 这里应该添加实际的API密钥验证逻辑
     # 目前简单返回True
-    return True if api_key and len(api_key) > 10 else False 
+    return True if api_key and len(api_key) > 10 else False
+
+def fetch_models_from_url(base_url: str, api_key: str) -> list[str]:
+    """
+    从指定的 OpenAI 兼容的 URL 获取模型列表。
+    """
+    if not base_url:
+        raise ValueError("Base URL 不能为空")
+    if not api_key:
+        raise ValueError("API Key 不能为空")
+
+    try:
+        # 构造正确的 /models URL
+        # 例如将 "https://api.openai.com/v1/chat/completions" 转换为 "https://api.openai.com/v1/models"
+        parsed_url = urlparse(base_url)
+        base_path = "/"
+        if "/v1" in parsed_url.path:
+            base_path = parsed_url.path.split("/v1")[0] + "/v1/"
+
+        models_url = urljoin(f"{parsed_url.scheme}://{parsed_url.netloc}", f"{base_path}models")
+
+        headers = {
+            "Authorization": f"Bearer {api_key}"
+        }
+
+        response = requests.get(models_url, headers=headers, timeout=10)
+        response.raise_for_status() # 如果请求失败 (例如 401, 404), 则会抛出异常
+
+        data = response.json()
+
+        # 从返回的数据中提取模型ID
+        model_ids = [model['id'] for model in data.get('data', [])]
+
+        # 过滤掉包含 "embed" 或 "vision" 的模型，专注于文本聊天模型
+        filtered_models = [m for m in model_ids if "embed" not in m.lower() and "vision" not in m.lower()]
+
+        return sorted(filtered_models)
+
+    except requests.exceptions.RequestException as e:
+        # 处理网络错误或API错误
+        raise ConnectionError(f"无法连接到服务器或API Key无效: {e}")
+    except (KeyError, ValueError) as e:
+        # 处理返回数据格式不正确的问题
+        raise ValueError(f"从服务器返回的数据格式不正确: {e}") 

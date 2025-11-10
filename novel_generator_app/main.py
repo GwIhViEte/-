@@ -60,7 +60,7 @@ from ui.screens.settings_screen import SettingsScreen
 from ui.screens.generation_screen import GenerationScreen
 
 class NovelGeneratorApp(App):
-    version = StringProperty("4.0.0")
+    version = StringProperty("5.0.5")
     
     def build(self):
         # 配置中文字体

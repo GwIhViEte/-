@@ -182,7 +182,7 @@ def main():
     # 应用程序名称
     app_name = input("\n请输入应用程序名称 (直接回车使用默认名称'AI小说生成器_v4.1.2'): ")
     if not app_name:
-        app_name = "AI小说生成器_v4.1.2"
+        app_name = "AI小说生成器"
     
     print("\n正在准备打包...")
     
@@ -201,28 +201,65 @@ def main():
                 if os.path.exists(obf_dir):
                     shutil.rmtree(obf_dir)
                 
-                # 生成加密脚本
-                pyarmor_cmd = [
-                    sys.executable, 
-                    "-m", 
-                    "pyarmor", 
-                    "obfuscate", 
-                    "--output", 
-                    obf_dir,
-                    "--restrict", 
-                    "0", 
-                    "--advanced", 
-                    "2",
-                    "main.py"
-                ]
-                
                 try:
-                    subprocess.check_call(pyarmor_cmd)
-                    print("代码加密成功！将使用加密后的代码打包")
-                    # 使用加密后的main.py
-                    main_script = os.path.join(obf_dir, "main.py")
+                    # 检查PyArmor版本并使用对应的命令
+                    import pyarmor
+                    pyarmor_version = pyarmor.__version__
+                    print(f"PyArmor版本: {pyarmor_version}")
+                    
+                    # PyArmor 8.x 使用新的命令语法
+                    if pyarmor_version.startswith('8'):
+                        print("使用PyArmor 8.x语法...")
+                        pyarmor_cmd = [
+                            sys.executable, "-m", "pyarmor", 
+                            "gen", 
+                            "--output", obf_dir,
+                            "--pack", "main.py",
+                            "--enable", "jit",
+                            "--private"
+                        ]
+                    else:
+                        # PyArmor 7.x 使用旧语法
+                        print("使用PyArmor 7.x语法...")
+                        pyarmor_cmd = [
+                            sys.executable, "-m", "pyarmor", 
+                            "obfuscate", 
+                            "--output", obf_dir,
+                            "--restrict", "0",
+                            "--advanced", "2",
+                            "main.py"
+                        ]
+                    
+                    print("执行PyArmor命令:", " ".join(pyarmor_cmd))
+                    result = subprocess.run(pyarmor_cmd, capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        print("代码加密成功！将使用加密后的代码打包")
+                        # 检查生成的文件
+                        possible_main_paths = [
+                            os.path.join(obf_dir, "main.py"),
+                            os.path.join(obf_dir, "dist", "main.py"),
+                            "main.py"  # 对于pack模式，可能直接替换原文件
+                        ]
+                        
+                        main_script = None
+                        for path in possible_main_paths:
+                            if os.path.exists(path):
+                                main_script = path
+                                print(f"找到混淆后的main.py: {path}")
+                                break
+                        
+                        if not main_script:
+                            print("警告：未找到混淆后的main.py文件，使用原始文件")
+                            main_script = "main.py"
+                    else:
+                        print(f"PyArmor加密失败，返回码: {result.returncode}")
+                        print(f"错误输出: {result.stderr}")
+                        print("将使用基本保护措施继续...")
+                        main_script = "main.py"
+                        
                 except Exception as e:
-                    print(f"PyArmor加密失败: {e}")
+                    print(f"PyArmor加密过程中出错: {e}")
                     print("将使用基本保护措施继续...")
                     main_script = "main.py"
             else:
@@ -244,6 +281,7 @@ def main():
         "--noconfirm", # 不询问确认
         f"--name={app_name}",
         "--log-level=INFO",
+        "--paths=.",
     ]
     
     # 添加图标
@@ -262,7 +300,7 @@ def main():
     pyinstaller_args.append("--strip")
     
     # 添加反调试措施
-    pyinstaller_args.append("--key=" + ''.join(random.choice(string.hexdigits) for _ in range(16)))
+    #pyinstaller_args.append("--key=" + ''.join(random.choice(string.hexdigits) for _ in range(16)))
     
     # 添加隐藏导入
     hidden_imports = [

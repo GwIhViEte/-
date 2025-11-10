@@ -17,21 +17,76 @@ parent_dir = os.path.dirname(os.path.dirname(current_dir))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+# PyInstaller 冻结环境下，确保 _MEIPASS 及子目录在 sys.path 中
+try:
+    if getattr(sys, 'frozen', False):
+        _mp = getattr(sys, '_MEIPASS', None)
+        if _mp:
+            if _mp not in sys.path:
+                sys.path.insert(0, _mp)
+            for _d in ('core', 'utils', 'templates', 'ui'):
+                _p = os.path.join(_mp, _d)
+                if os.path.isdir(_p) and _p not in sys.path:
+                    sys.path.insert(0, _p)
+except Exception:
+    pass
+
 # 尝试使用相对导入（作为模块导入时）或使用绝对导入（直接运行时）
 try:
+    # 1) 作为包被导入（ui 隶属于 novel_generator 包）
     from ..core.generator import NovelGenerator
-    from ..core.model_manager import get_model_list
+    from ..core.model_manager import get_model_list, fetch_models_from_url
     from ..utils.config import save_config, load_config
     from ..utils.common import open_directory
     from ..templates.prompts import MODEL_DESCRIPTIONS, GENRE_SPECIFIC_PROMPTS, __version__
-    from .dialogs import AdvancedSettingsDialog, AboutDialog, WelcomeDialog, MultiTypeDialog
-except ImportError:
-    from novel_generator.core.generator import NovelGenerator
-    from novel_generator.core.model_manager import get_model_list
-    from novel_generator.utils.config import save_config, load_config
-    from novel_generator.utils.common import open_directory
-    from novel_generator.templates.prompts import MODEL_DESCRIPTIONS, GENRE_SPECIFIC_PROMPTS, __version__
-    from novel_generator.ui.dialogs import AdvancedSettingsDialog, AboutDialog, WelcomeDialog, MultiTypeDialog
+    from .dialogs import AdvancedSettingsDialog, AboutDialog, MultiTypeDialog
+except Exception:
+    try:
+        # 2) 顶层包名可用（novel_generator.*）
+        from novel_generator.core.generator import NovelGenerator
+        from novel_generator.core.model_manager import get_model_list, fetch_models_from_url
+        from novel_generator.utils.config import save_config, load_config
+        from novel_generator.utils.common import open_directory
+        from novel_generator.templates.prompts import MODEL_DESCRIPTIONS, GENRE_SPECIFIC_PROMPTS, __version__
+        from novel_generator.ui.dialogs import AdvancedSettingsDialog, AboutDialog, MultiTypeDialog
+    except Exception:
+        try:
+            # 3) 模块直导（sys.path 指向各子目录：core/utils/templates/ui）
+            from generator import NovelGenerator
+            from model_manager import get_model_list, fetch_models_from_url
+            from config import save_config, load_config
+            from common import open_directory
+            from prompts import MODEL_DESCRIPTIONS, GENRE_SPECIFIC_PROMPTS, __version__
+            from dialogs import AdvancedSettingsDialog, AboutDialog, MultiTypeDialog
+        except Exception:
+            # 4) 目录直导（sys.path 包含项目根，使 core/utils/templates 可用为包）
+            from core.generator import NovelGenerator
+            from core.model_manager import get_model_list, fetch_models_from_url
+            from utils.config import save_config, load_config
+            from utils.common import open_directory
+            from templates.prompts import MODEL_DESCRIPTIONS, GENRE_SPECIFIC_PROMPTS, __version__
+    from ui.dialogs import AdvancedSettingsDialog, AboutDialog, MultiTypeDialog
+
+# 兜底导入：若上述路径均失败，动态扩展 sys.path 并重试
+if 'NovelGenerator' not in globals():
+    try:
+        extra_dirs = [os.path.join(parent_dir, d) for d in ('core', 'utils', 'templates', 'ui')]
+        for d in extra_dirs:
+            if os.path.isdir(d) and d not in sys.path:
+                sys.path.insert(0, d)
+        from core.generator import NovelGenerator
+        from core.model_manager import get_model_list, fetch_models_from_url
+        from utils.config import save_config, load_config
+        from utils.common import open_directory
+        from templates.prompts import MODEL_DESCRIPTIONS, GENRE_SPECIFIC_PROMPTS, __version__
+        from ui.dialogs import AdvancedSettingsDialog, AboutDialog, MultiTypeDialog
+    except Exception:
+        from generator import NovelGenerator
+        from model_manager import get_model_list, fetch_models_from_url
+        from config import save_config, load_config
+        from common import open_directory
+        from prompts import MODEL_DESCRIPTIONS, GENRE_SPECIFIC_PROMPTS, __version__
+        from dialogs import AdvancedSettingsDialog, AboutDialog, MultiTypeDialog
 
 def run_asyncio_event_loop(coro):
     """安全地运行异步协程，处理跨平台问题，特别是Windows
@@ -104,6 +159,11 @@ class NovelGeneratorApp:
         self.generate_cover_var = tk.BooleanVar(value=False)  # 默认不生成封面
         self.generate_music_var = tk.BooleanVar(value=False)  # 默认不生成音乐
         self.num_cover_images_var = tk.IntVar(value=1)  # 默认生成1张封面
+        self.base_url_var = tk.StringVar(value="https://api.openai.com/v1/chat/completions")
+        
+        # 监听API密钥和base URL变化来控制刷新模型按钮状态
+        self.api_key_var.trace('w', self.check_refresh_button_state)
+        self.base_url_var.trace('w', self.check_refresh_button_state)
         
         # 高级设置
         self.temperature = 0.66
@@ -129,7 +189,9 @@ class NovelGeneratorApp:
             "creativity": 0.7,
             "formality": 0.5,
             "detail_level": 0.6,
-            "writing_style": "平衡"
+            "writing_style": "平衡",
+            "paragraph_length_preference": "适中",
+            "dialogue_frequency": "适中"
         }
         
         # 加载模型列表
@@ -148,21 +210,12 @@ class NovelGeneratorApp:
         # 加载配置后更新小说类型列表
         self.update_novel_types()
         
-        # 如果是首次使用，显示欢迎对话框
-        if not self.api_key_var.get():
-            self.show_welcome_dialog()
-            
-    def show_welcome_dialog(self):
-        """显示欢迎对话框并处理API密钥输入"""
-        dialog = WelcomeDialog(self.root)
+        # 初始检查刷新模型按钮状态
+        self.check_refresh_button_state()
         
-        # 等待对话框关闭
-        self.root.wait_window(dialog)
-        
-        # 重新加载配置以获取API密钥
-        self.config = load_config()
-        if "api_key" in self.config:
-            self.api_key_var.set(self.config.get("api_key", ""))
+        # 欢迎对话框已被禁用，用户可直接使用或在设置中配置API密钥
+        # if not self.api_key_var.get():
+        #     self.show_welcome_dialog()
             
     def create_menu(self):
         """创建菜单栏"""
@@ -252,14 +305,30 @@ class NovelGeneratorApp:
         # 创建主框架
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # 单页滚动容器（外层）
+        self._main_canvas = tk.Canvas(main_frame, highlightthickness=0)
+        v_scroll = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self._main_canvas.yview)
+        self._main_canvas.configure(yscrollcommand=v_scroll.set)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollable_frame = ttk.Frame(self._main_canvas)
+        self._scroll_window = self._main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        # 调整滚动区域与宽度
+        scrollable_frame.bind("<Configure>", lambda e: self._main_canvas.configure(scrollregion=self._main_canvas.bbox("all")))
+        self._main_canvas.bind("<Configure>", lambda e: self._main_canvas.itemconfig(self._scroll_window, width=e.width))
+        # 绑定鼠标滚轮
+        try:
+            self._bind_mousewheel(self._main_canvas)
+        except Exception:
+            pass
         
         # 创建左右分栏，调整比例为2:1
-        left_frame = ttk.Frame(main_frame, width=650)
+        left_frame = ttk.Frame(scrollable_frame, width=650)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        left_frame.pack_propagate(False)  # 防止子组件改变frame大小
+        left_frame.pack_propagate(True)  # 防止子组件改变frame大小
         
-        right_frame = ttk.Frame(main_frame, width=350)
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        right_frame = ttk.Frame(scrollable_frame, width=350)
+        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
         
         # 左侧滚动框架
         left_scroll_frame = ttk.Frame(left_frame)
@@ -281,8 +350,15 @@ class NovelGeneratorApp:
         left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # 左侧内容框架
-        content_frame = ttk.Frame(left_scrollable_frame)
+        content_frame = ttk.Frame(left_frame)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # 移除左侧内层滚动容器，改为使用外层单页滚动
+        try:
+            left_canvas.destroy()
+            left_scrollbar.destroy()
+            left_scroll_frame.destroy()
+        except Exception:
+            pass
         
         # 顶部标题和Logo
         header_frame = ttk.Frame(content_frame)
@@ -309,21 +385,22 @@ class NovelGeneratorApp:
         ttk.Label(settings_grid, text="API密钥:").grid(row=0, column=0, sticky=tk.W, pady=5)
         api_key_entry = ttk.Entry(settings_grid, textvariable=self.api_key_var, width=40, show="*")
         api_key_entry.grid(row=0, column=1, sticky=tk.W, pady=5)
+
+        # Base URL
+        ttk.Label(settings_grid, text="Base URL:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        base_url_entry = ttk.Entry(settings_grid, textvariable=self.base_url_var, width=40)
+        base_url_entry.grid(row=1, column=1, columnspan=2, sticky=tk.W, pady=5)
         
         # 添加获取API密钥的按钮链接
         get_api_btn = ttk.Button(settings_grid, text="获取密钥", command=self.open_api_website)
-        get_api_btn.grid(row=0, column=2, sticky=tk.W, pady=5, padx=(5, 0))
+        get_api_btn.grid(row=1, column=2, sticky=tk.W, pady=5, padx=(5, 0))
         
-        # 模型选择
-        model_frame = ttk.Frame(left_frame)
-        model_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=5, pady=5)
+        # 模型选择（放在 Base URL 下方）
+        ttk.Label(settings_grid, text="选择模型:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        model_buttons_frame = ttk.Frame(settings_grid)
+        model_buttons_frame.grid(row=2, column=1, columnspan=2, sticky=tk.W, padx=5)
         
-        ttk.Label(model_frame, text="选择模型:").grid(row=0, column=0, sticky="w")
-        
-        model_buttons_frame = ttk.Frame(model_frame)
-        model_buttons_frame.grid(row=0, column=1, sticky="w", padx=5)
-        
-        self.model_combo = ttk.Combobox(model_buttons_frame, textvariable=self.model_var, width=20)
+        self.model_combo = ttk.Combobox(model_buttons_frame, textvariable=self.model_var, width=20, state="readonly")
         self.model_combo['values'] = self.models
         self.model_combo.bind("<<ComboboxSelected>>", self.on_model_change)
         self.model_combo.pack(side=tk.LEFT, padx=(0, 5))
@@ -331,35 +408,33 @@ class NovelGeneratorApp:
         info_btn = ttk.Button(model_buttons_frame, text="模型说明", command=self.show_model_info)
         info_btn.pack(side=tk.LEFT, padx=5)
         
-        # 添加更新模型按钮
         self.update_model_btn = ttk.Button(
             model_buttons_frame, 
-            text="更新模型", 
-            command=self.update_current_model,
+            text="刷新模型", 
+            command=self.refresh_models,
             state=tk.DISABLED
         )
         self.update_model_btn.pack(side=tk.LEFT, padx=5)
         
-        # 模型描述标签
-        self.model_desc_label = ttk.Label(model_frame, text="", wraplength=600)
-        self.model_desc_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=2)
+        # 模型描述标签（紧随其后）
+        self.model_desc_label = ttk.Label(settings_grid, text="", wraplength=600)
+        self.model_desc_label.grid(row=3, column=0, columnspan=3, sticky="w", pady=2)
         
         # 设置初始模型描述
         self.on_model_change()
         
-        # 语言选择
-        ttk.Label(settings_grid, text="语言:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        language_frame = ttk.Frame(settings_grid)
-        language_frame.grid(row=2, column=1, sticky=tk.W, pady=5)
-        
-        for lang in ["中文", "English"]:
-            ttk.Radiobutton(language_frame, text=lang, variable=self.language_var, 
-                          value=lang).pack(side=tk.LEFT, padx=5)
+        # 语言选择（改为下拉框，置于第4行右侧，避免与模型描述冲突）
+        language_inline = ttk.Frame(settings_grid)
+        language_inline.grid(row=4, column=2, sticky=tk.W, pady=5)
+        ttk.Label(language_inline, text="语言:").pack(side=tk.LEFT, padx=(0, 5))
+        self.language_combo = ttk.Combobox(language_inline, textvariable=self.language_var, values=["中文", "English"], state="readonly", width=12)
+        self.language_combo.pack(side=tk.LEFT)
+        self.language_combo.bind("<<ComboboxSelected>>", self.on_language_change)
         
         # 小说类型
-        ttk.Label(settings_grid, text="小说类型:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        ttk.Label(settings_grid, text="小说类型:").grid(row=4, column=0, sticky=tk.W, pady=5)
         type_frame = ttk.Frame(settings_grid)
-        type_frame.grid(row=3, column=1, sticky=tk.W, pady=5)
+        type_frame.grid(row=4, column=1, sticky=tk.W, pady=5)
         
         self.novel_type_combo = ttk.Combobox(type_frame, textvariable=self.novel_type_var, width=15)
         self.novel_type_combo.pack(side=tk.LEFT)
@@ -376,37 +451,37 @@ class NovelGeneratorApp:
         random_type_check.pack(side=tk.LEFT, padx=5)
         
         # 目标字数 - 改为可输入的形式
-        ttk.Label(settings_grid, text="目标字数:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        ttk.Label(settings_grid, text="目标字数:").grid(row=5, column=0, sticky=tk.W, pady=5)
         target_length_entry = ttk.Entry(settings_grid, textvariable=self.target_length_var, width=10)
-        target_length_entry.grid(row=4, column=1, sticky=tk.W, pady=5)
-        ttk.Label(settings_grid, text="(建议值: 5000-100000)").grid(row=4, column=2, sticky=tk.W, pady=5)
+        target_length_entry.grid(row=5, column=1, sticky=tk.W, pady=5)
+        ttk.Label(settings_grid, text="(建议值: 5000-100000)").grid(row=5, column=2, sticky=tk.W, pady=5)
         
         # 添加验证功能
         self.register_validator(target_length_entry, self.validate_number)
         
         # 生成数量 - 改为可输入的形式
-        ttk.Label(settings_grid, text="生成数量:").grid(row=5, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(settings_grid, text="生成数量:").grid(row=6, column=0, sticky=tk.W, padx=5, pady=5)
         num_novels_entry = ttk.Entry(settings_grid, textvariable=self.num_novels_var, width=10)
-        num_novels_entry.grid(row=5, column=1, sticky=tk.W, padx=5, pady=5)
-        ttk.Label(settings_grid, text="(建议值: 1-20)").grid(row=5, column=2, sticky=tk.W, pady=5)
+        num_novels_entry.grid(row=6, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(settings_grid, text="(建议值: 1-20)").grid(row=6, column=2, sticky=tk.W, pady=5)
         
         # 添加验证功能
         self.register_validator(num_novels_entry, self.validate_number)
         
         # 并行数 - 改为可输入的形式
-        ttk.Label(settings_grid, text="并行线程数:").grid(row=6, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(settings_grid, text="并行线程数:").grid(row=7, column=0, sticky=tk.W, padx=5, pady=5)
         max_workers_entry = ttk.Entry(settings_grid, textvariable=self.max_workers_var, width=10)
-        max_workers_entry.grid(row=6, column=1, sticky=tk.W, padx=5, pady=5)
-        ttk.Label(settings_grid, text="(建议值: 1-20)").grid(row=6, column=2, sticky=tk.W, pady=5)
+        max_workers_entry.grid(row=7, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(settings_grid, text="(建议值: 1-20)").grid(row=7, column=2, sticky=tk.W, pady=5)
         
         # 添加验证功能
         self.register_validator(max_workers_entry, self.validate_number)
         
         # 续写模式
-        ttk.Label(settings_grid, text="续写模式:").grid(row=7, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(settings_grid, text="续写模式:").grid(row=8, column=0, sticky=tk.W, padx=5, pady=5)
         
         continue_frame = ttk.Frame(settings_grid)
-        continue_frame.grid(row=7, column=1, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        continue_frame.grid(row=8, column=1, columnspan=3, sticky=tk.W, padx=5, pady=5)
         
         # 单文件续写
         ttk.Radiobutton(continue_frame, text="不续写", 
@@ -423,7 +498,7 @@ class NovelGeneratorApp:
         
         # 单文件续写框架
         self.continue_file_frame = ttk.Frame(settings_grid)
-        self.continue_file_frame.grid(row=8, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        self.continue_file_frame.grid(row=9, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
         self.continue_file_entry = ttk.Entry(self.continue_file_frame, textvariable=self.continue_file_var, width=30)
         self.continue_file_entry.pack(side=tk.LEFT, padx=(0, 5))
         self.browse_file_button = ttk.Button(self.continue_file_frame, text="选择文件", command=self.browse_continue_file)
@@ -431,7 +506,7 @@ class NovelGeneratorApp:
         
         # 批量续写框架
         self.continue_dir_frame = ttk.Frame(settings_grid)
-        self.continue_dir_frame.grid(row=9, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        self.continue_dir_frame.grid(row=10, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
         self.continue_dir_entry = ttk.Entry(self.continue_dir_frame, textvariable=self.continue_dir_var, width=30)
         self.continue_dir_entry.pack(side=tk.LEFT, padx=(0, 5))
         self.browse_dir_button = ttk.Button(self.continue_dir_frame, text="选择文件夹", command=self.browse_continue_dir)
@@ -443,7 +518,7 @@ class NovelGeneratorApp:
         
         # 输出目录选择
         output_dir_row = ttk.Frame(settings_grid)
-        output_dir_row.grid(row=10, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        output_dir_row.grid(row=11, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
         ttk.Label(output_dir_row, text="输出目录:").pack(side=tk.LEFT, padx=(0, 5))
         self.output_dir_entry = ttk.Entry(output_dir_row, width=30)
         self.output_dir_entry.pack(side=tk.LEFT, padx=(0, 5))
@@ -451,15 +526,15 @@ class NovelGeneratorApp:
         
         # 结局生成选项
         ending_frame = ttk.Frame(settings_grid)
-        ending_frame.grid(row=11, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        ending_frame.grid(row=12, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
         ttk.Checkbutton(ending_frame, text="生成结局", variable=self.create_ending_var).pack(side=tk.LEFT)
         
         # 自定义提示词
-        ttk.Label(settings_grid, text="自定义提示词:").grid(row=12, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(settings_grid, text="自定义提示词:").grid(row=13, column=0, sticky=tk.W, padx=5, pady=5)
         
         # 添加自定义提示词说明按钮
         prompt_help_frame = ttk.Frame(settings_grid)
-        prompt_help_frame.grid(row=12, column=1, sticky=tk.E, padx=5, pady=5)
+        prompt_help_frame.grid(row=13, column=1, sticky=tk.E, padx=5, pady=5)
         
         insert_template_btn = ttk.Button(prompt_help_frame, text="插入模板", 
                                        command=self.insert_prompt_template)
@@ -467,16 +542,16 @@ class NovelGeneratorApp:
         
         # 自定义提示词文本框
         self.custom_prompt_text = scrolledtext.ScrolledText(settings_grid, height=5, width=50)
-        self.custom_prompt_text.grid(row=13, column=0, columnspan=3, sticky=tk.W+tk.E, padx=5, pady=5)
+        self.custom_prompt_text.grid(row=14, column=0, columnspan=3, sticky=tk.W+tk.E, padx=5, pady=5)
         
         # 保存配置复选框
         save_config_check = ttk.Checkbutton(settings_grid, text="保存配置", 
                                           variable=self.save_config_var)
-        save_config_check.grid(row=14, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        save_config_check.grid(row=15, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
         
         # 自动摘要选项
         auto_summary_frame = ttk.LabelFrame(settings_grid, text="自动摘要设置")
-        auto_summary_frame.grid(row=15, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+        auto_summary_frame.grid(row=16, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
         
         # 创建结局选项
         create_ending_check = ttk.Checkbutton(
@@ -484,7 +559,7 @@ class NovelGeneratorApp:
             text="直接创作结局", 
             variable=self.create_ending_var
         )
-        create_ending_check.grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        create_ending_check.grid(row=1, column=0, sticky="w", padx=5, pady=2)
         
         # 创建随机类型选项（用于批量生成）
         random_types_check = ttk.Checkbutton(
@@ -492,7 +567,7 @@ class NovelGeneratorApp:
             text="随机小说类型", 
             variable=self.random_types_var
         )
-        random_types_check.grid(row=0, column=1, sticky="w", padx=5, pady=2)
+        random_types_check.grid(row=1, column=1, sticky="w", padx=5, pady=2)
         
         # 创建自动摘要选项
         auto_summary_check = ttk.Checkbutton(
@@ -500,11 +575,11 @@ class NovelGeneratorApp:
             text="启用自动摘要", 
             variable=self.auto_summary_var
         )
-        auto_summary_check.grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        auto_summary_check.grid(row=2, column=0, sticky="w", padx=5, pady=2)
         
         # 自动摘要间隔设置
         auto_summary_interval_frame = ttk.Frame(auto_summary_frame)
-        auto_summary_interval_frame.grid(row=1, column=1, sticky="w", padx=5, pady=2)
+        auto_summary_interval_frame.grid(row=2, column=1, sticky="w", padx=5, pady=2)
         
         ttk.Label(auto_summary_interval_frame, text="摘要间隔 (字): ").pack(side=tk.LEFT)
         auto_summary_interval_entry = ttk.Spinbox(
@@ -523,11 +598,11 @@ class NovelGeneratorApp:
             text="生成封面图片", 
             variable=self.generate_cover_var
         )
-        generate_cover_check.grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        generate_cover_check.grid(row=3, column=0, sticky="w", padx=5, pady=2)
         
         # 封面图片数量设置
         cover_count_frame = ttk.Frame(auto_summary_frame)
-        cover_count_frame.grid(row=2, column=1, sticky="w", padx=5, pady=2)
+        cover_count_frame.grid(row=3, column=1, sticky="w", padx=5, pady=2)
         
         ttk.Label(cover_count_frame, text="封面数量: ").pack(side=tk.LEFT)
         cover_count_entry = ttk.Spinbox(
@@ -546,7 +621,7 @@ class NovelGeneratorApp:
             text="生成主题音乐", 
             variable=self.generate_music_var
         )
-        generate_music_check.grid(row=3, column=0, sticky="w", padx=5, pady=2)
+        generate_music_check.grid(row=4, column=0, sticky="w", padx=5, pady=2)
         
         # 媒体生成说明
         media_info_label = ttk.Label(
@@ -555,7 +630,7 @@ class NovelGeneratorApp:
             font=("Arial", 8),
             foreground="gray"
         )
-        media_info_label.grid(row=3, column=1, sticky="w", padx=5, pady=2)
+        media_info_label.grid(row=4, column=1, sticky="w", padx=5, pady=2)
         
         # 高级设置按钮
         advanced_settings_btn = ttk.Button(
@@ -563,11 +638,48 @@ class NovelGeneratorApp:
             text="更多高级设置",
             command=self.open_advanced_settings
         )
-        advanced_settings_btn.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        advanced_settings_btn.grid(row=5, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         
+        # 结尾生成设置
+        ending_frame = ttk.LabelFrame(settings_grid, text="结尾生成设置")
+        ending_frame.grid(row=17, column=0, columnspan=3, sticky=tk.W, padx=5, pady=5)
+
+        if not hasattr(self, 'ending_trigger_ratio_var'):
+            self.ending_trigger_ratio_var = tk.DoubleVar(value=self.advanced_settings.get("ending_trigger_ratio", 0.90))
+            self.ending_stop_overrun_ratio_var = tk.DoubleVar(value=self.advanced_settings.get("ending_stop_overrun_ratio", 1.02))
+            self.ending_stop_attempts_var = tk.IntVar(value=self.advanced_settings.get("ending_stop_attempts", 3))
+            self.ending_stop_min_ratio_var = tk.DoubleVar(value=self.advanced_settings.get("ending_stop_min_ratio", 0.98))
+            self.ending_marker_stop_var = tk.BooleanVar(value=self.advanced_settings.get("ending_marker_stop", True))
+
+        ttk.Label(ending_frame, text="触发阈值(目标倍数):").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Scale(ending_frame, from_=0.80, to=1.00, orient=tk.HORIZONTAL,
+                  variable=self.ending_trigger_ratio_var, length=140).grid(row=0, column=1, sticky=tk.W, pady=2)
+        trig_val = ttk.Label(ending_frame, text=f"{self.ending_trigger_ratio_var.get():.2f}")
+        trig_val.grid(row=0, column=2, sticky=tk.W, padx=5)
+        self.ending_trigger_ratio_var.trace_add('write', lambda *a: trig_val.config(text=f"{self.ending_trigger_ratio_var.get():.2f}"))
+
+        ttk.Label(ending_frame, text="停止阈值(超额倍数):").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Scale(ending_frame, from_=1.00, to=1.10, orient=tk.HORIZONTAL,
+                  variable=self.ending_stop_overrun_ratio_var, length=140).grid(row=1, column=1, sticky=tk.W, pady=2)
+        over_val = ttk.Label(ending_frame, text=f"{self.ending_stop_overrun_ratio_var.get():.2f}")
+        over_val.grid(row=1, column=2, sticky=tk.W, padx=5)
+        self.ending_stop_overrun_ratio_var.trace_add('write', lambda *a: over_val.config(text=f"{self.ending_stop_overrun_ratio_var.get():.2f}"))
+
+        ttk.Label(ending_frame, text="最少结尾段数:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Spinbox(ending_frame, from_=1, to=8, width=8, textvariable=self.ending_stop_attempts_var).grid(row=2, column=1, sticky=tk.W, pady=2)
+
+        ttk.Label(ending_frame, text="停止最小倍数(达最少段后):").grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Scale(ending_frame, from_=0.90, to=1.05, orient=tk.HORIZONTAL,
+                  variable=self.ending_stop_min_ratio_var, length=140).grid(row=3, column=1, sticky=tk.W, pady=2)
+        min_val = ttk.Label(ending_frame, text=f"{self.ending_stop_min_ratio_var.get():.2f}")
+        min_val.grid(row=3, column=2, sticky=tk.W, padx=5)
+        self.ending_stop_min_ratio_var.trace_add('write', lambda *a: min_val.config(text=f"{self.ending_stop_min_ratio_var.get():.2f}"))
+
+        ttk.Checkbutton(ending_frame, text="识别结尾关键词即停止(全书完/完结/终章/The End)",
+                        variable=self.ending_marker_stop_var).grid(row=4, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
         # 操作按钮
         buttons_frame = ttk.Frame(settings_grid)
-        buttons_frame.grid(row=16, column=0, columnspan=3, pady=10)
+        buttons_frame.grid(row=18, column=0, columnspan=3, pady=10)
         
         self.generate_button = ttk.Button(buttons_frame, text="开始生成", 
                                          command=self.start_generation)
@@ -600,25 +712,25 @@ class NovelGeneratorApp:
         status_grid = ttk.Frame(log_frame)
         status_grid.pack(fill=tk.X, pady=5, padx=10)
         
-        ttk.Label(status_grid, text="状态:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(status_grid, text="状态:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
         self.status_label = ttk.Label(status_grid, text="就绪")
-        self.status_label.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        self.status_label.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
         
-        ttk.Label(status_grid, text="已生成字数:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(status_grid, text="已生成字数:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
         self.word_count_label = ttk.Label(status_grid, text="0")
-        self.word_count_label.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        self.word_count_label.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         
-        ttk.Label(status_grid, text="目标字数:").grid(row=1, column=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(status_grid, text="目标字数:").grid(row=2, column=2, sticky=tk.W, padx=5, pady=2)
         self.target_word_label = ttk.Label(status_grid, text="0")
-        self.target_word_label.grid(row=1, column=3, sticky=tk.W, padx=5, pady=2)
+        self.target_word_label.grid(row=2, column=3, sticky=tk.W, padx=5, pady=2)
         
-        ttk.Label(status_grid, text="完成百分比:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(status_grid, text="完成百分比:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
         self.percent_label = ttk.Label(status_grid, text="0%")
-        self.percent_label.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+        self.percent_label.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
         
-        ttk.Label(status_grid, text="预计剩余时间:").grid(row=2, column=2, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(status_grid, text="预计剩余时间:").grid(row=3, column=2, sticky=tk.W, padx=5, pady=2)
         self.time_left_label = ttk.Label(status_grid, text="--:--")
-        self.time_left_label.grid(row=2, column=3, sticky=tk.W, padx=5, pady=2)
+        self.time_left_label.grid(row=3, column=3, sticky=tk.W, padx=5, pady=2)
         
         # 进度条
         self.progress = ttk.Progressbar(log_frame, orient=tk.HORIZONTAL, length=100, mode='determinate')
@@ -635,31 +747,31 @@ class NovelGeneratorApp:
         clear_log_button.pack(anchor=tk.E, padx=10, pady=5)
         
         # 创建底部链接框架
-        links_frame = ttk.Frame(log_frame)
-        links_frame.pack(fill=tk.X, padx=10, pady=(0, 5), anchor=tk.S)
+        #links_frame = ttk.Frame(log_frame)
+        #links_frame.pack(fill=tk.X, padx=10, pady=(0, 5), anchor=tk.S)
         
         # API充值地址链接
-        api_link_label = tk.Label(links_frame, text="API充值地址: ", font=("Arial", 9))
-        api_link_label.pack(side=tk.LEFT, pady=(0, 2))
+        #api_link_label = tk.Label(log_frame, text="API充值地址: ", font=("Arial", 9))
+        #api_link_label.pack(side=tk.LEFT, pady=(0, 2))
         
-        api_link = tk.Label(links_frame, text="aiapi.space", fg="blue", cursor="hand2", font=("Arial", 9))
-        api_link.pack(side=tk.LEFT, pady=(0, 2))
-        api_link.bind("<Button-1>", lambda e: self.open_api_website())
-        api_link.bind("<Enter>", lambda e: api_link.config(font=("Arial", 9, "underline")))
-        api_link.bind("<Leave>", lambda e: api_link.config(font=("Arial", 9)))
+        #api_link = tk.Label(log_frame, text="api.gwihviete.xyz", fg="blue", cursor="hand2", font=("Arial", 9))
+        #api_link.pack(side=tk.LEFT, pady=(0, 2))
+        #api_link.bind("<Button-1>", lambda e: self.open_api_website())
+        #api_link.bind("<Enter>", lambda e: api_link.config(font=("Arial", 9, "underline")))
+        #api_link.bind("<Leave>", lambda e: api_link.config(font=("Arial", 9)))
         
         # 空间分隔符
-        ttk.Label(links_frame, text="  |  ").pack(side=tk.LEFT, pady=(0, 2))
+        #ttk.Label(links_frame, text="  |  ").pack(side=tk.LEFT, pady=(0, 2))
         
         # 教程地址链接
-        tutorial_link_label = tk.Label(links_frame, text="教程地址: ", font=("Arial", 9))
-        tutorial_link_label.pack(side=tk.LEFT, pady=(0, 2))
+        #tutorial_link_label = tk.Label(links_frame, text="教程地址: ", font=("Arial", 9))
+        #tutorial_link_label.pack(side=tk.LEFT, pady=(0, 2))
         
-        tutorial_link = tk.Label(links_frame, text="@飞书文档", fg="blue", cursor="hand2", font=("Arial", 9))
-        tutorial_link.pack(side=tk.LEFT, pady=(0, 2))
-        tutorial_link.bind("<Button-1>", lambda e: self.open_tutorial_website())
-        tutorial_link.bind("<Enter>", lambda e: tutorial_link.config(font=("Arial", 9, "underline")))
-        tutorial_link.bind("<Leave>", lambda e: tutorial_link.config(font=("Arial", 9)))
+        #tutorial_link = tk.Label(links_frame, text="@飞书文档", fg="blue", cursor="hand2", font=("Arial", 9))
+        #tutorial_link.pack(side=tk.LEFT, pady=(0, 2))
+        #tutorial_link.bind("<Button-1>", lambda e: self.open_tutorial_website())
+        #tutorial_link.bind("<Enter>", lambda e: tutorial_link.config(font=("Arial", 9, "underline")))
+        #tutorial_link.bind("<Leave>", lambda e: tutorial_link.config(font=("Arial", 9)))
     
     def on_continue_mode_change(self, *args):
         if self.continue_mode_var.get():
@@ -809,7 +921,9 @@ class NovelGeneratorApp:
             creativity=self.advanced_settings.get("creativity", 0.7),
             formality=self.advanced_settings.get("formality", 0.5),
             detail_level=self.advanced_settings.get("detail_level", 0.6),
-            writing_style=self.advanced_settings.get("writing_style", "平衡")
+            writing_style=self.advanced_settings.get("writing_style", "平衡"),
+            paragraph_length_preference=self.advanced_settings.get("paragraph_length_preference", "适中"),
+            dialogue_frequency=self.advanced_settings.get("dialogue_frequency", "适中")
         )
         
         result = dialog.show()
@@ -831,6 +945,18 @@ class NovelGeneratorApp:
             
     def save_current_config(self):
         """保存当前配置"""
+        # 同步结尾阈值到高级设置中
+        try:
+            self.advanced_settings.update({
+                "ending_trigger_ratio": float(self.ending_trigger_ratio_var.get()) if hasattr(self, 'ending_trigger_ratio_var') else self.advanced_settings.get("ending_trigger_ratio", 0.9),
+                "ending_stop_overrun_ratio": float(self.ending_stop_overrun_ratio_var.get()) if hasattr(self, 'ending_stop_overrun_ratio_var') else self.advanced_settings.get("ending_stop_overrun_ratio", 1.02),
+                "ending_stop_attempts": int(self.ending_stop_attempts_var.get()) if hasattr(self, 'ending_stop_attempts_var') else self.advanced_settings.get("ending_stop_attempts", 3),
+                "ending_stop_min_ratio": float(self.ending_stop_min_ratio_var.get()) if hasattr(self, 'ending_stop_min_ratio_var') else self.advanced_settings.get("ending_stop_min_ratio", 0.98),
+                "ending_marker_stop": bool(self.ending_marker_stop_var.get()) if hasattr(self, 'ending_marker_stop_var') else self.advanced_settings.get("ending_marker_stop", True),
+            })
+        except Exception:
+            pass
+
         config = {
             "api_key": self.api_key_var.get(),
             "model": self.model_var.get(),
@@ -840,6 +966,7 @@ class NovelGeneratorApp:
             "num_novels": self.num_novels_var.get(),
             "max_workers": self.max_workers_var.get(),
             "output_dir": self.output_dir_entry.get(),
+            "base_url": self.base_url_var.get(),
             "custom_prompt": self.custom_prompt_text.get("1.0", tk.END).strip(),
             "create_ending": self.create_ending_var.get(),
             "random_types": self.random_types_var.get(),
@@ -862,6 +989,9 @@ class NovelGeneratorApp:
         # 设置基本配置
         if "api_key" in config:
             self.api_key_var.set(config["api_key"])
+            
+        if "base_url" in config and config["base_url"]:
+            self.base_url_var.set(config["base_url"])
             
         if "model" in config:
             self.model_var.set(config["model"])
@@ -896,7 +1026,17 @@ class NovelGeneratorApp:
             self.random_types_var.set(config["random_types"])
             
         if "advanced_settings" in config:
-            self.advanced_settings = config["advanced_settings"]
+            # 合并配置，确保新参数有默认值
+            saved_advanced_settings = config["advanced_settings"]
+            # 更新现有的advanced_settings，保留默认值
+            for key, value in saved_advanced_settings.items():
+                self.advanced_settings[key] = value
+            
+            # 确保新增的参数有默认值（向后兼容旧配置）
+            if "paragraph_length_preference" not in self.advanced_settings:
+                self.advanced_settings["paragraph_length_preference"] = "适中"
+            if "dialogue_frequency" not in self.advanced_settings:
+                self.advanced_settings["dialogue_frequency"] = "适中"
             
             # 同时更新高级设置的单独变量
             if "temperature" in self.advanced_settings:
@@ -914,7 +1054,15 @@ class NovelGeneratorApp:
                 "top_p": self.top_p,
                 "max_tokens": self.max_tokens,
                 "context_length": self.context_length,
-                "autosave_interval": 60
+                "autosave_interval": 60,
+                "auto_summary": True,
+                "auto_summary_interval": 10000,
+                "creativity": 0.7,
+                "formality": 0.5,
+                "detail_level": 0.6,
+                "writing_style": "平衡",
+                "paragraph_length_preference": "适中",
+                "dialogue_frequency": "适中"
             }
 
         if "auto_summary" in config:
@@ -994,6 +1142,7 @@ class NovelGeneratorApp:
             generation_settings = {
                 "api_key": api_key,
                 "model": self.model_var.get(),
+                "base_url": self.base_url_var.get().strip(),
                 "max_workers": self.max_workers_var.get(),
                 "language": self.language_var.get(),
                 "novel_type": self.novel_type_var.get(),
@@ -1016,7 +1165,9 @@ class NovelGeneratorApp:
                 "auto_summary_interval": self.auto_summary_interval_var.get() if self.auto_summary_var.get() else 0,
                 "generate_cover": self.generate_cover_var.get(),
                 "generate_music": self.generate_music_var.get(),
-                "num_cover_images": self.num_cover_images_var.get()
+                "num_cover_images": self.num_cover_images_var.get(),
+                # 结尾阈值
+                # 阈值在创建生成器后设置，避免构造参数不匹配
             }
             
             # 保存配置
@@ -1054,6 +1205,20 @@ class NovelGeneratorApp:
             
             # 创建生成器实例
             self.generator = NovelGenerator(**self.generation_settings)
+            # 设置结尾阈值（避免构造参数不匹配）
+            try:
+                if hasattr(self, 'ending_trigger_ratio_var'):
+                    self.generator.ending_trigger_ratio = float(self.ending_trigger_ratio_var.get())
+                if hasattr(self, 'ending_stop_overrun_ratio_var'):
+                    self.generator.ending_stop_overrun_ratio = float(self.ending_stop_overrun_ratio_var.get())
+                if hasattr(self, 'ending_stop_attempts_var'):
+                    self.generator.ending_stop_attempts = int(self.ending_stop_attempts_var.get())
+                if hasattr(self, 'ending_stop_min_ratio_var'):
+                    self.generator.ending_stop_min_ratio = float(self.ending_stop_min_ratio_var.get())
+                if hasattr(self, 'ending_marker_stop_var'):
+                    self.generator.ending_marker_stop = bool(self.ending_marker_stop_var.get())
+            except Exception:
+                pass
             
             # 设置主输出目录
             self.generator.main_output_dir = self.output_dir
@@ -1081,7 +1246,7 @@ class NovelGeneratorApp:
         self.stop_button.config(state=tk.DISABLED)
         self.pause_btn.config(state=tk.DISABLED)
         self.resume_btn.config(state=tk.DISABLED)
-        self.update_model_btn.config(state=tk.DISABLED)
+        # 刷新模型按钮状态由API密钥和base URL决定，不在这里控制
         
         # 日志消息
         self.log_message("生成完成")
@@ -1165,8 +1330,45 @@ class NovelGeneratorApp:
             self.log_message(f"已选择{len(selected_types)}种小说类型进行批量生成")
     
     def refresh_models(self):
-        """显示模型说明"""
-        self.show_model_info()
+        """从用户提供的 URL 动态刷新模型列表。"""
+        base_url = self.base_url_var.get().strip()
+        api_key = self.api_key_var.get().strip()
+
+        if not base_url:
+            messagebox.showinfo("提示", "请先填写 Base URL。")
+            return
+        if not api_key:
+            messagebox.showinfo("提示", "请先填写 API Key。")
+            return
+
+        self.log_message(f"正在从 {base_url} 获取模型列表...")
+        self.root.config(cursor="wait") # 让鼠标变成等待状态
+        self.update_model_btn.config(state=tk.DISABLED) # 临时禁用按钮防止重复点击
+
+        try:
+            # 调用我们新创建的函数
+            model_list = fetch_models_from_url(base_url, api_key)
+
+            if not model_list:
+                self.log_message("未能从服务器获取到任何模型。")
+                messagebox.showwarning("警告", "未能获取到任何模型列表，请检查URL和API Key是否正确。")
+                return
+
+            # 更新下拉框的选项
+            self.model_combo['values'] = model_list
+            self.log_message(f"成功获取到 {len(model_list)} 个模型。")
+
+            # 默认选中第一个模型
+            if model_list:
+                self.model_var.set(model_list[0])
+            messagebox.showinfo("成功", "模型列表已成功更新！")
+
+        except Exception as e:
+            self.log_message(f"错误: {e}")
+            messagebox.showerror("更新失败", f"无法获取模型列表，请检查控制台日志获取详细信息。\n\n错误: {e}")
+        finally:
+            self.root.config(cursor="") # 恢复鼠标
+            self.check_refresh_button_state() # 恢复按钮状态（根据API密钥和base URL决定）
         
     def on_model_change(self, *args):
         """当选择的模型改变时更新模型说明"""
@@ -1175,10 +1377,6 @@ class NovelGeneratorApp:
             self.model_desc_label.config(text=MODEL_DESCRIPTIONS[selected_model])
         else:
             self.model_desc_label.config(text="")
-        
-        # 如果正在生成，启用更新模型按钮
-        if hasattr(self, 'is_generating') and self.is_generating and self.generator:
-            self.update_model_btn.config(state=tk.NORMAL)
 
     def update_current_model(self):
         """更新当前正在使用的模型"""
@@ -1188,6 +1386,17 @@ class NovelGeneratorApp:
         selected_model = self.model_var.get()
         if self.generator.update_model(selected_model):
             self.log_message(f"模型已更新为: {selected_model}")
+            self.update_model_btn.config(state=tk.DISABLED)
+    
+    def check_refresh_button_state(self, *args):
+        """检查API密钥和base URL，控制刷新模型按钮的状态"""
+        api_key = self.api_key_var.get().strip()
+        base_url = self.base_url_var.get().strip()
+        
+        # 如果API密钥和base URL都不为空，启用按钮
+        if api_key and base_url:
+            self.update_model_btn.config(state=tk.NORMAL)
+        else:
             self.update_model_btn.config(state=tk.DISABLED)
     
     def show_model_info(self):
@@ -1210,6 +1419,33 @@ class NovelGeneratorApp:
             self.generator.resume()
             self.pause_btn.config(state=tk.NORMAL)
             self.resume_btn.config(state=tk.DISABLED)
+    
+    def _bind_mousewheel(self, widget):
+        """绑定鼠标滚轮以滚动外层画布（兼容 Win/macOS/Linux）。"""
+        try:
+            if sys.platform.startswith('win'):
+                widget.bind_all("<MouseWheel>", self._on_mousewheel)
+            elif sys.platform == 'darwin':
+                widget.bind_all("<MouseWheel>", self._on_mousewheel)
+            else:
+                # Linux 使用 Button-4/5
+                widget.bind_all("<Button-4>", lambda e: self._main_canvas.yview_scroll(-1, "units"))
+                widget.bind_all("<Button-5>", lambda e: self._main_canvas.yview_scroll(1, "units"))
+        except Exception:
+            pass
+
+    def _on_mousewheel(self, event):
+        try:
+            if sys.platform == 'darwin':
+                # macOS 的 delta 通常是 ±1
+                self._main_canvas.yview_scroll(int(-1 * event.delta), "units")
+            else:
+                # Windows: delta 通常是 ±120 的倍数
+                self._main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            # 兜底处理
+            step = -1 if getattr(event, 'delta', 0) > 0 else 1
+            self._main_canvas.yview_scroll(step, "units")
     
     def register_validator(self, widget, validate_func):
         """为输入框注册验证函数"""
@@ -1372,7 +1608,7 @@ class NovelGeneratorApp:
     def open_api_website(self):
         """打开获取API密钥的网站"""
         import webbrowser
-        webbrowser.open("https://aiapi.space") 
+        webbrowser.open("https://api.gwihviete.xyz") 
         
     def open_tutorial_website(self):
         """打开教程网站"""
@@ -1380,3 +1616,7 @@ class NovelGeneratorApp:
         webbrowser.open("https://ccnql5c7kjke.feishu.cn/wiki/FXp9wHkozi8a3YkH3lRcw5EBn3f") 
     
  
+
+
+
+

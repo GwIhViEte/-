@@ -130,7 +130,7 @@
 - **状态跟踪**：完整的任务生命周期
 
 ### API兼容性
-- 支持aiapi.space的最新API格式
+
 - 正确处理multipart/form-data和application/json请求
 - 兼容MidJourney和Suno的不同响应格式
 

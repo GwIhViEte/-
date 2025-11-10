@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger('novel_generator')
 
 # 全局变量
-API_BASE_URL = "https://aiapi.space/v1/chat/completions"  # 替换为新的API地址
+API_BASE_URL = "https://api.openai.com/v1/chat/completions"
 
 class NovelGenerator:
     """小说生成器的简化版，适用于移动设备"""
@@ -179,7 +179,7 @@ class NovelGenerator:
         
         # 生成结局
         if self.create_ending and self.is_running:
-            ending = await self._generate_ending(title, outline)
+            ending = await self._generate_ending(title, outline, self.current_content)
             self.current_content += f"\n## 结局\n\n{ending}\n"
             self.current_length = len(self.current_content)
             
@@ -260,13 +260,14 @@ class NovelGenerator:
             logger.error(f"解析章节时出错: {str(e)}")
             return f"第{chapter_number}章", "章节内容生成失败"
     
-    async def _generate_ending(self, title, outline):
+    async def _generate_ending(self, title, outline, current_content=""):
         """
         生成小说结局
         
         Args:
             title (str): 小说标题
             outline (str): 小说大纲
+            current_content (str): 当前已生成的小说内容
             
         Returns:
             str: 结局内容
@@ -274,8 +275,23 @@ class NovelGenerator:
         prompt = (
             f"为标题为《{title}》的{self.novel_type}创作一个引人入胜的结局。\n\n"
             f"大纲：{outline}\n\n"
-            f"结局应该对故事中的主要情节进行收束，并对主要人物的命运做出交代。"
         )
+        
+        # 如果有已生成的内容，添加到提示词中作为上下文
+        if current_content:
+            # 截取最后部分内容作为上下文（避免超过token限制）
+            context_limit = 8000  # 大约8000字符的上下文
+            if len(current_content) > context_limit:
+                # 从最后部分开始，找到完整段落
+                truncated_content = current_content[-context_limit:]
+                first_paragraph_start = truncated_content.find('\n\n')
+                if first_paragraph_start != -1:
+                    truncated_content = truncated_content[first_paragraph_start + 2:]
+                prompt += f"已有内容（最近部分）：\n{truncated_content}\n\n"
+            else:
+                prompt += f"已有内容：\n{current_content}\n\n"
+        
+        prompt += f"基于以上大纲和已有内容，创作一个令人满意的结局，收束所有主要情节线和人物弧光，对故事中的主要人物命运做出交代。"
         
         response = await self._call_openai_api(prompt)
         return response.strip()

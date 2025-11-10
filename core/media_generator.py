@@ -11,7 +11,7 @@ class MediaGenerator:
     
     def __init__(self, api_key: str, status_callback=None):
         self.api_key = api_key
-        self.base_url = "aiapi.space"
+        "api.openai.com"
         self.status_callback = status_callback
         
     def update_status(self, message: str):

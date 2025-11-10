@@ -6,7 +6,7 @@
 
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-4.1.3-orange.svg)](VERSION)
+[![Version](https://img.shields.io/badge/version-5.0.4-orange.svg)](VERSION)
 
 ## 📖 详细使用指南
 

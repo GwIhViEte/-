@@ -95,7 +95,7 @@ class NovelGenerator:
         self.num_cover_images = num_cover_images
         
         # API相关
-        self.base_url = "https://aiapi.space/v1/chat/completions"
+        self.base_url = "https://api.openai.com/v1/chat/completions"
         self.session = None
         self.existing_content = {}
         
@@ -1020,10 +1020,10 @@ class NovelGenerator:
                 self.session = aiohttp.ClientSession()
                 
             if not hasattr(self, 'base_url'):
-                self.base_url = "https://aiapi.space/v1/chat/completions"
-            elif self.base_url != "https://aiapi.space/v1/chat/completions":
+                self.base_url = "https://api.openai.com/v1/chat/completions"
+            #elif self.base_url != "https://api.openai.com/v1/chat/completions":
                 # 确保始终使用正确的API URL
-                self.base_url = "https://aiapi.space/v1/chat/completions"
+                #self.base_url = "https://api.openai.com/v1/chat/completions"
                 
             # 确保existing_content是字典类型
             if not hasattr(self, 'existing_content'):
