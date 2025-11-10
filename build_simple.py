@@ -64,6 +64,32 @@ def main():
         "json",
         "asyncio",
         "threading",
+        # 项目核心模块
+        "ui",
+        "ui.app",
+        "ui.dialogs",
+        "core",
+        "core.generator",
+        "core.media_generator",
+        "core.media_task_manager",
+        "core.model_manager",
+        "core.sanqianliu_generator",
+        "core.sanqianliu_interface",
+        "utils",
+        "utils.common",
+        "utils.config",
+        "utils.quality",
+        "templates",
+        "templates.prompts",
+        # novel_generator 命名空间
+        "novel_generator",
+        "novel_generator.ui",
+        "novel_generator.ui.app",
+        "novel_generator.ui.dialogs",
+        "novel_generator.core",
+        "novel_generator.core.generator",
+        "novel_generator.utils",
+        "novel_generator.templates",
     ]
 
     for imp in hidden_imports:

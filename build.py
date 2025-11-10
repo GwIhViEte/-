@@ -20,7 +20,10 @@ def clean_sensitive_info():
 
     try:
         # 清理配置文件中的API密钥
-        config_files = ["novel_generator_config.json", "novel_generator_config.ini"]
+        config_files = [
+            "novel_generator_config.json",
+            "novel_generator_config.ini",
+        ]
 
         for config_file in config_files:
             if os.path.exists(config_file):
@@ -125,7 +128,14 @@ def main():
     except ImportError:
         print("正在安装 PyInstaller...")
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller>=6.0.0"]
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "pyinstaller>=6.0.0",
+            ]
         )
         print("PyInstaller 安装完成")
 
@@ -136,7 +146,14 @@ def main():
         print("正在安装 PyArmor（代码保护工具）...")
         try:
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "--upgrade", "pyarmor"]
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "pyarmor",
+                ]
             )
             print("PyArmor 安装完成")
             import pyarmor
@@ -323,7 +340,8 @@ def main():
 
     # 添加反调试措施
     # pyinstaller_args.append(
-    #     "--key=" + ''.join(random.choice(string.hexdigits) for _ in range(16))
+    #     "--key="
+    #     + ''.join(random.choice(string.hexdigits) for _ in range(16))
     # )
 
     # 添加隐藏导入
@@ -340,6 +358,32 @@ def main():
         "tkinter.scrolledtext",
         "tkinter.filedialog",
         "tkinter.messagebox",
+        # 添加项目核心模块
+        "ui",
+        "ui.app",
+        "ui.dialogs",
+        "core",
+        "core.generator",
+        "core.media_generator",
+        "core.media_task_manager",
+        "core.model_manager",
+        "core.sanqianliu_generator",
+        "core.sanqianliu_interface",
+        "utils",
+        "utils.common",
+        "utils.config",
+        "utils.quality",
+        "templates",
+        "templates.prompts",
+        # 添加 novel_generator 命名空间
+        "novel_generator",
+        "novel_generator.ui",
+        "novel_generator.ui.app",
+        "novel_generator.ui.dialogs",
+        "novel_generator.core",
+        "novel_generator.core.generator",
+        "novel_generator.utils",
+        "novel_generator.templates",
     ]
     for imp in hidden_imports:
         pyinstaller_args.append(f"--hidden-import={imp}")
