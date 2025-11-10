@@ -129,7 +129,7 @@ jobs:
         tar -czf "../AI小说生成器_v${{ matrix.python-version }}_linux.tar.gz" *
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: AI小说生成器_v${{ matrix.python-version }}_linux
         path: |

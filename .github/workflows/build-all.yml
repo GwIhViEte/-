@@ -207,7 +207,7 @@ jobs:
         EOF
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}
         path: |
