@@ -1,7 +1,8 @@
 # fmt: off
 # flake8: noqa
+# mypy: ignore-errors
 # 版本信息
-__version__ = "5.0.7"
+__version__ = "5.0.8"
 __author__ = "GwIhViEte"
 
 
