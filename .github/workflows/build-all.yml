@@ -1,0 +1,231 @@
+name: Multi-Platform Build and Release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      build_all:
+        description: 'Build for all platforms'
+        required: false
+        default: 'true'
+      python_version:
+        description: 'Python version to build'
+        required: false
+        default: '3.11'
+        type: choice
+        options:
+          - '3.9'
+          - '3.10'
+          - '3.11'
+          - '3.12'
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up build matrix
+      id: set-matrix
+      run: |
+        if [ "${{ github.event.inputs.build_all }}" = "true" ] || [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "create" ]; then
+          echo 'matrix={"include":[{"platform":"windows","os":"windows-latest"},{"platform":"linux","os":"ubuntu-latest"},{"platform":"macos","os":"macos-latest"}]}' >> $GITHUB_OUTPUT
+        else
+          echo 'matrix={"include":[{"platform":"${{ github.event.inputs.platform }}","os":"${{ github.event.inputs.os }}"}]}' >> $GITHUB_OUTPUT
+        fi
+
+  build:
+    needs: build-matrix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ github.event.inputs.python_version || '3.11' }}
+
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk python3-dev p7zip-full
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        # Install any macOS-specific dependencies if needed
+
+    - name: Install system dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Install any Windows-specific dependencies if needed
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+        pip install aiohttp pillow
+
+    - name: Get version from templates
+      id: get-version
+      run: |
+        if [ -f "templates/prompts.py" ]; then
+          VERSION=$(python -c "import sys; sys.path.append('templates'); import prompts; print(prompts.__version__)" 2>/dev/null || echo "5.0.0")
+        else
+          VERSION="5.0.0"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Build executable (Windows)
+      if: matrix.platform == 'windows'
+      run: |
+        pyinstaller --onefile --windowed --name "AI小说生成器_v${{ steps.get-version.outputs.version }}" --icon=resources/icon.ico main.py
+
+    - name: Build executable (Linux)
+      if: matrix.platform == 'linux'
+      run: |
+        pyinstaller --onefile --name "AI小说生成器_v${{ steps.get-version.outputs.version }}" main.py
+
+    - name: Build executable (macOS)
+      if: matrix.platform == 'macos'
+      run: |
+        pyinstaller --onefile --windowed --name "AI小说生成器_v${{ steps.get-version.outputs.version }}" --icon=resources/icon.icns main.py
+
+    - name: Create distribution package
+      run: |
+        mkdir -p dist/package
+        
+        # Copy executable
+        if [ "${{ matrix.platform }}" = "windows" ]; then
+          cp "dist/AI小说生成器_v${{ steps.get-version.outputs.version }}.exe" dist/package/
+        else
+          cp "dist/AI小说生成器_v${{ steps.get-version.outputs.version }}" dist/package/
+        fi
+        
+        # Copy essential directories
+        mkdir -p dist/package/core
+        mkdir -p dist/package/utils
+        mkdir -p dist/package/templates
+        mkdir -p dist/package/ui
+        mkdir -p dist/package/resources
+        mkdir -p dist/package/example_prompts
+        
+        # Copy source files
+        if [ "${{ matrix.platform }}" = "windows" ]; then
+          xcopy /E /I core\*.py dist\package\core\
+          xcopy /E /I utils\*.py dist\package\utils\
+          xcopy /E /I templates\*.py dist\package\templates\
+          xcopy /E /I ui\*.py dist\package\ui\
+          xcopy /E /I ui\assets dist\package\ui\assets\
+          xcopy /E /I resources\* dist\package\resources\
+          xcopy /E /I example_prompts\* dist\package\example_prompts\
+          copy main.py dist\package\
+          copy README*.md dist\package\
+        else
+          cp core/*.py dist/package/core/
+          cp utils/*.py dist/package/utils/
+          cp templates/*.py dist/package/templates/
+          cp ui/*.py dist/package/ui/
+          cp -r ui/assets dist/package/ui/
+          cp -r resources/* dist/package/resources/ 2>/dev/null || true
+          cp example_prompts/* dist/package/example_prompts/ 2>/dev/null || true
+          cp main.py dist/package/
+          cp README*.md dist/package/
+        fi
+
+    - name: Create launcher scripts
+      run: |
+        cd dist/package
+        
+        # Windows launcher
+        if [ "${{ matrix.platform }}" = "windows" ]; then
+          echo @echo off > run.bat
+          echo echo AI小说生成器启动器 >> run.bat
+          echo echo ======================== >> run.bat
+          echo AI小说生成器_v${{ steps.get-version.outputs.version }}.exe >> run.bat
+          echo pause >> run.bat
+        fi
+        
+        # Linux launcher
+        if [ "${{ matrix.platform }}" = "linux" ]; then
+          cat > run.sh << 'EOF'
+        #!/bin/bash
+        echo "AI小说生成器启动器"
+        echo "=================="
+        ./AI小说生成器_v${{ steps.get-version.outputs.version }}
+          EOF
+          chmod +x run.sh
+        fi
+        
+        # macOS launcher
+        if [ "${{ matrix.platform }}" = "macos" ]; then
+          cat > run.command << 'EOF'
+        #!/bin/bash
+        echo "AI小说生成器启动器"
+        echo "=================="
+        ./AI小说生成器_v${{ steps.get-version.outputs.version }}
+          EOF
+          chmod +x run.command
+        fi
+
+    - name: Create archive
+      run: |
+        cd dist/package
+        
+        if [ "${{ matrix.platform }}" = "windows" ]; then
+          7z a -tzip "../AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.zip" *
+        elif [ "${{ matrix.platform }}" = "macos" ]; then
+          zip -r "../AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.zip" *
+        else
+          tar -czf "../AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.tar.gz" *
+        fi
+
+    - name: Create build info
+      run: |
+        cat > dist/build_info_${{ matrix.platform }}.txt << EOF
+        Build Information
+        ==================
+        Build Date: $(date)
+        Build Time: $(date +%T)
+        Platform: ${{ matrix.platform }}
+        Python Version: ${{ github.event.inputs.python_version || '3.11' }}
+        Git Commit: ${{ github.sha }}
+        Branch: ${{ github.ref_name }}
+        Version: ${{ steps.get-version.outputs.version }}
+        EOF
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}
+        path: |
+          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_${{ matrix.platform }}.*
+          dist/build_info_${{ matrix.platform }}.txt
+        retention-days: 30
+
+    - name: Create Release (if tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_windows.zip
+          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_linux.tar.gz
+          dist/AI小说生成器_v${{ steps.get-version.outputs.version }}_macos.zip
+          dist/build_info_*.txt
+        draft: false
+        prerelease: contains(github.ref, 'beta')
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

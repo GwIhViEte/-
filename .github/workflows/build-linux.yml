@@ -1,0 +1,150 @@
+name: Build Linux Executable
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11, 3.12]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-tk python3-dev
+        sudo apt-get install -y p7zip-full
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: Install additional dependencies for packaging
+      run: |
+        pip install aiohttp pillow
+
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller --onefile --name "AI小说生成器_v${{ matrix.python-version }}" main.py
+
+    - name: Create output directory
+      run: |
+        mkdir -p dist/linux
+
+    - name: Copy additional files
+      run: |
+        # Copy essential directories and files
+        mkdir -p dist/linux/core
+        mkdir -p dist/linux/utils
+        mkdir -p dist/linux/templates
+        mkdir -p dist/linux/ui
+        mkdir -p dist/linux/resources
+        mkdir -p dist/linux/example_prompts
+        
+        # Copy core files
+        cp core/*.py dist/linux/core/
+        
+        # Copy utility files
+        cp utils/*.py dist/linux/utils/
+        
+        # Copy template files
+        cp templates/*.py dist/linux/templates/
+        
+        # Copy UI files
+        cp ui/*.py dist/linux/ui/
+        cp -r ui/assets dist/linux/ui/
+        
+        # Copy resources
+        cp -r resources/* dist/linux/resources/ 2>/dev/null || true
+        
+        # Copy examples
+        cp example_prompts/* dist/linux/example_prompts/ 2>/dev/null || true
+        
+        # Copy main files
+        cp main.py dist/linux/
+        cp main_wrapper.py dist/linux/
+        
+        # Copy documentation
+        cp README.md dist/linux/
+        cp README_EN.md dist/linux/
+        
+        # Copy license
+        cp LICENSE.txt dist/linux/ 2>/dev/null || true
+
+    - name: Create version info
+      run: |
+        # Create version info file
+        echo "Build Information" > dist/linux/build_info.txt
+        echo "==================" >> dist/linux/build_info.txt
+        echo "Build Date: $(date)" >> dist/linux/build_info.txt
+        echo "Build Time: $(date +%T)" >> dist/linux/build_info.txt
+        echo "Python Version: ${{ matrix.python-version }}" >> dist/linux/build_info.txt
+        echo "Git Commit: ${{ github.sha }}" >> dist/linux/build_info.txt
+        echo "Branch: ${{ github.ref_name }}" >> dist/linux/build_info.txt
+
+    - name: Create launcher script
+      run: |
+        # Create a launcher script
+        cat > dist/linux/launcher.sh << 'EOF'
+        #!/bin/bash
+        echo "AI小说生成器启动器"
+        echo "=================="
+        
+        # Check if Python is available
+        if ! command -v python3 &> /dev/null; then
+            echo "错误: 未找到Python3，请先安装Python"
+            exit 1
+        fi
+        
+        # Get script directory
+        DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+        
+        # Run the executable
+        cd "$DIR"
+        ./AI小说生成器_v${{ matrix.python-version }}
+        EOF
+        
+        chmod +x dist/linux/launcher.sh
+
+    - name: Create TAR archive
+      run: |
+        cd dist/linux
+        tar -czf "../AI小说生成器_v${{ matrix.python-version }}_linux.tar.gz" *
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: AI小说生成器_v${{ matrix.python-version }}_linux
+        path: |
+          dist/AI小说生成器_v${{ matrix.python-version }}
+          dist/AI小说生成器_v${{ matrix.python-version }}_linux.tar.gz
+        retention-days: 30
+
+    - name: Create Release (if tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/AI小说生成器_v${{ matrix.python-version }}
+          dist/AI小说生成器_v${{ matrix.python-version }}_linux.tar.gz
+        draft: false
+        prerelease: contains(github.ref, 'beta')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
