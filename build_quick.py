@@ -28,7 +28,7 @@ def clean_build_dirs():
 def ensure_pyinstaller():
     """确保PyInstaller已安装"""
     try:
-        import PyInstaller
+        import PyInstaller  # type: ignore[import-untyped]
 
         print(f"PyInstaller 版本: {PyInstaller.__version__}")
         return True
@@ -189,6 +189,12 @@ def main():
         "--hidden-import=novel_generator.core.generator",
         "--hidden-import=novel_generator.utils",
         "--hidden-import=novel_generator.templates",
+        # 收集所有项目模块
+        "--collect-all=ui",
+        "--collect-all=core",
+        "--collect-all=utils",
+        "--collect-all=templates",
+        "--collect-all=novel_generator",
         "--exclude-module=matplotlib",
         "--exclude-module=numpy",
         "--exclude-module=scipy",
@@ -270,7 +276,9 @@ def main():
             }
 
             try:
-                config_path = os.path.join("dist", "novel_generator_config.json")
+                config_path = os.path.join(  # noqa: E501
+                    "dist", "novel_generator_config.json"
+                )
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump(clean_config, f, ensure_ascii=False, indent=2)
                 print("已创建默认配置文件")

@@ -24,12 +24,14 @@ def main():
 
     # 检查PyInstaller
     try:
-        import PyInstaller
+        import PyInstaller  # type: ignore[import-untyped]
 
         print(f"PyInstaller 版本: {PyInstaller.__version__}")
     except ImportError:
         print("安装 PyInstaller...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
+        subprocess.check_call(  # noqa: E501
+            [sys.executable, "-m", "pip", "install", "pyinstaller"]
+        )
 
     # 构建命令
     cmd = [
@@ -94,6 +96,10 @@ def main():
 
     for imp in hidden_imports:
         cmd.append(f"--hidden-import={imp}")
+
+    # 收集所有项目模块
+    for pkg in ["ui", "core", "utils", "templates", "novel_generator"]:
+        cmd.append(f"--collect-all={pkg}")
 
     # 排除模块
     excludes = ["matplotlib", "numpy", "scipy", "pandas", "pytest"]
