@@ -87,12 +87,12 @@ StringFileInfo(
   StringTable(
     u'080404B0',
     [StringStruct(u'CompanyName', u'147229'),
-    StringStruct(u'FileDescription', u'AI小说生成器 - 智能小说创作工具'),
+    StringStruct(u'FileDescription', u'AI_Novel_Generator - 智能小说创作工具'),
     StringStruct(u'FileVersion', u'4.1.2'),
-    StringStruct(u'InternalName', u'AI小说生成器'),
+    StringStruct(u'InternalName', u'AI_Novel_Generator'),
     StringStruct(u'LegalCopyright', u'Copyright (C) 2024 147229'),
-    StringStruct(u'OriginalFilename', u'AI小说生成器_v4.1.2.exe'),
-    StringStruct(u'ProductName', u'AI小说生成器'),
+    StringStruct(u'OriginalFilename', u'AI_Novel_Generator.exe'),
+    StringStruct(u'ProductName', u'AI_Novel_Generator'),
     StringStruct(u'ProductVersion', u'4.1.2')])
     ]),
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])

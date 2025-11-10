@@ -34,7 +34,7 @@ def main():
     # 构建命令
     cmd = [
         "pyinstaller",
-        "--name=AI_Novel_Generator_v4.1.2",
+        "--name=AI_Novel_Generator",
         "--onedir",
         "--windowed",
         "--clean",
@@ -84,7 +84,7 @@ def main():
 
     try:
         # 执行打包
-        result = subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)
 
         elapsed = time.time() - start_time
         minutes = int(elapsed // 60)

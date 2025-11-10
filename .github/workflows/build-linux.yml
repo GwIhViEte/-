@@ -42,7 +42,7 @@ jobs:
 
     - name: Build executable with PyInstaller
       run: |
-        pyinstaller --onefile --name "AI_Novel_Generator_v${{ matrix.python-version }}" main.py
+        pyinstaller --onefile --name "AI_Novel_Generator" main.py
 
     - name: Create output directory
       run: |
@@ -118,7 +118,7 @@ jobs:
         
         # Run the executable
         cd "$DIR"
-        ./AI_Novel_Generator_v${{ matrix.python-version }}
+        ./AI_Novel_Generator
         EOF
         
         chmod +x dist/linux/launcher.sh
@@ -126,15 +126,15 @@ jobs:
     - name: Create TAR archive
       run: |
         cd dist/linux
-        tar -czf "../AI_Novel_Generator_v${{ matrix.python-version }}_linux.tar.gz" *
+        tar -czf "../AI_Novel_Generator_linux.tar.gz" *
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: AI_Novel_Generator_v${{ matrix.python-version }}_linux
+        name: AI_Novel_Generator_linux
         path: |
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}_linux.tar.gz
+          dist/AI_Novel_Generator
+          dist/AI_Novel_Generator_linux.tar.gz
         retention-days: 30
 
     - name: Create Release (if tag)
@@ -142,8 +142,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}_linux.tar.gz
+          dist/AI_Novel_Generator
+          dist/AI_Novel_Generator_linux.tar.gz
         draft: false
         prerelease: contains(github.ref, 'beta')
       env:

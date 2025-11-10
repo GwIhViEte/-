@@ -36,7 +36,7 @@ jobs:
 
     - name: Build executable with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name "AI_Novel_Generator_v${{ matrix.python-version }}" --icon=resources/icon.ico main.py
+        pyinstaller --onefile --windowed --name "AI_Novel_Generator" --icon=resources/icon.ico main.py
 
     - name: Create output directory
       run: |
@@ -102,22 +102,22 @@ jobs:
         echo echo Installing... >> dist/windows/install.bat
         echo echo. >> dist/windows/install.bat
         echo echo Installation Complete! >> dist/windows/install.bat
-        echo echo Please double-click AI_Novel_Generator_v${{ matrix.python-version }}.exe to start the program >> dist/windows/install.bat
+        echo echo Please double-click AI_Novel_Generator.exe to start the program >> dist/windows/install.bat
         echo echo. >> dist/windows/install.bat
         echo pause >> dist/windows/install.bat
 
     - name: Create ZIP archive
       run: |
         cd dist/windows
-        7z a -tzip "../AI_Novel_Generator_v${{ matrix.python-version }}_windows.zip" *
+        7z a -tzip "../AI_Novel_Generator_windows.zip" *
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: AI_Novel_Generator_v${{ matrix.python-version }}_windows
+        name: AI_Novel_Generator_windows
         path: |
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}.exe
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}_windows.zip
+          dist/AI_Novel_Generator.exe
+          dist/AI_Novel_Generator_windows.zip
         retention-days: 30
 
     - name: Create Release (if tag)
@@ -125,8 +125,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}.exe
-          dist/AI_Novel_Generator_v${{ matrix.python-version }}_windows.zip
+          dist/AI_Novel_Generator.exe
+          dist/AI_Novel_Generator_windows.zip
         draft: false
         prerelease: contains(github.ref, 'beta')
       env:

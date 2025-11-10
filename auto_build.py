@@ -39,7 +39,7 @@ def auto_build():
     # 自动配置打包参数（推荐设置）
     is_onefile = True  # 使用文件夹模式，启动更快
     use_console = False  # 隐藏控制台窗口
-    app_name = "AI小说生成器_v5.0.5"
+    app_name = "AI_Novel_Generator"
 
     print("\n打包配置:")
     print(f"- 模式: {'单文件' if is_onefile else '文件夹'}")

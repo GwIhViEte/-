@@ -49,7 +49,7 @@ echo
 python build_config.py
 
 # 执行PyInstaller构建
-pyinstaller --onefile --windowed --name "AI_Novel_Generator_v5.0.0" --icon=resources/icon.icns main.py
+pyinstaller --onefile --windowed --name "AI_Novel_Generator" --icon=resources/icon.icns main.py
 
 if [ $? -ne 0 ]; then
     echo "构建失败！"
@@ -64,7 +64,7 @@ echo
 mkdir -p dist/release
 
 # 复制文件到发布目录
-cp "dist/AI_Novel_Generator_v5.0.0" "dist/release/"
+cp "dist/AI_Novel_Generator" "dist/release/"
 cp main.py "dist/release/"
 cp main_wrapper.py "dist/release/"
 cp README*.md "dist/release/"
@@ -83,7 +83,7 @@ cat > "dist/release/run.command" << 'EOF'
 #!/bin/bash
 echo "AI Novel Generator Launcher"
 echo "==========================="
-./AI_Novel_Generator_v5.0.0
+./AI_Novel_Generator
 EOF
 
 chmod +x "dist/release/run.command"
@@ -103,7 +103,7 @@ echo "正在创建ZIP压缩包..."
 echo
 
 cd dist/release
-zip -r "../AI_Novel_Generator_v5.0.0_macos.zip" *
+zip -r "../AI_Novel_Generator_macos.zip" *
 
 cd ../..
 
@@ -112,8 +112,8 @@ echo "========================================"
 echo "构建完成！"
 echo "========================================"
 echo
-echo "可执行文件: dist/AI_Novel_Generator_v5.0.0"
-echo "发布包: dist/AI_Novel_Generator_v5.0.0_macos.zip"
+echo "可执行文件: dist/AI_Novel_Generator"
+echo "发布包: dist/AI_Novel_Generator_macos.zip"
 echo "发布目录: dist/release/"
 echo
 

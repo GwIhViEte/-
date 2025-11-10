@@ -35,9 +35,9 @@
 ### 手动下载
 1. 访问 **Actions** → **构建任务**
 2. 在 **Artifacts** 部分下载：
-   - `AI_Novel_Generator_v5.0.0_windows.zip`（Windows）
-   - `AI_Novel_Generator_v5.0.0_linux.tar.gz`（Linux）
-   - `AI_Novel_Generator_v5.0.0_macos.zip`（macOS）
+   - `AI_Novel_Generator_windows.zip`（Windows）
+   - `AI_Novel_Generator_linux.tar.gz`（Linux）
+   - `AI_Novel_Generator_macos.zip`（macOS）
 
 ## 💻 本地构建
 
@@ -87,8 +87,8 @@ chmod +x build_macos.sh
 
 ### 构建产物包含
 ```
-AI_Novel_Generator_v5.0.0/
-├── AI_Novel_Generator_v5.0.0.exe    # 主程序
+AI_Novel_Generator/
+├── AI_Novel_Generator.exe    # 主程序
 ├── run.bat                         # Windows启动脚本
 ├── core/                           # 核心模块
 │   ├── __init__.py
