@@ -220,9 +220,9 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/AI_Novel_Generator_windows.zip
-          dist/AI_Novel_Generator_linux.tar.gz
-          dist/AI_Novel_Generator_macos.zip
+          dist/AI_Novel_Generator_windows.*
+          dist/AI_Novel_Generator_linux.*
+          dist/AI_Novel_Generator_macos.*
           dist/build_info_*.txt
         draft: false
         prerelease: contains(github.ref, 'beta')
