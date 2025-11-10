@@ -7,11 +7,11 @@ import importlib.util
 # 日志配置
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('novel_generator.log', encoding='utf-8')
-    ]
+        logging.FileHandler("novel_generator.log", encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger("novel_generator")
 
@@ -19,21 +19,34 @@ logger = logging.getLogger("novel_generator")
 logger.info(f"当前工作目录: {os.getcwd()}")
 
 # 检测是否在 PyInstaller 冻结环境
-is_frozen = getattr(sys, 'frozen', False)
+is_frozen = getattr(sys, "frozen", False)
 if is_frozen:
-    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    base_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     logger.info(f"运行于打包环境，基准目录: {base_dir}")
 else:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     logger.info(f"运行于开发环境，基准目录: {base_dir}")
 
+# 在冻结环境中，确保base_dir在sys.path最前面
+if is_frozen and base_dir not in sys.path:
+    sys.path.insert(0, base_dir)
+    logger.info(f"添加PyInstaller基准目录到 sys.path: {base_dir}")
+
+# 确保novel_generator包可用（激活别名机制）
+try:
+    import novel_generator  # noqa: F401  pylint: disable=unused-import
+
+    logger.info("已加载 novel_generator 包（别名支持）")
+except ImportError as e:
+    logger.warning(f"加载 novel_generator 包失败: {e}")
+
 # 注入常见路径（尽量不依赖于磁盘目录以便 PyInstaller 的 PyiImporter 工作）
 current_dir = os.path.dirname(os.path.abspath(__file__))
 paths_to_add = [
-    os.path.join(base_dir, 'ui'),
-    os.path.join(base_dir, 'core'),
-    os.path.join(base_dir, 'utils'),
-    os.path.join(base_dir, 'templates'),
+    os.path.join(base_dir, "ui"),
+    os.path.join(base_dir, "core"),
+    os.path.join(base_dir, "utils"),
+    os.path.join(base_dir, "templates"),
     current_dir,
 ]
 for path in paths_to_add:
@@ -44,14 +57,18 @@ for path in paths_to_add:
 # 尝试加载 ctypes 设置 Windows AppID（可选）
 try:
     import ctypes
-    if sys.platform.startswith('win'):
+
+    if sys.platform.startswith("win"):
         try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('novel_generator.app')
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "novel_generator.app"
+            )
             logger.info("已设置 Windows 应用 ID")
         except Exception as e:
             logger.warning(f"设置 Windows 应用 ID 失败: {e}")
 except ImportError:
     logger.warning("无法导入 ctypes 模块")
+
 
 # 探测模块可见性（日志用）
 def check_module(module_name: str) -> bool:
@@ -64,16 +81,19 @@ def check_module(module_name: str) -> bool:
         logger.error(f"探测模块 {module_name} 出错: {e}")
         return False
 
-check_module('ui.app')
-check_module('novel_generator.ui.app')
+
+check_module("ui.app")
+check_module("novel_generator.ui.app")
 
 # 导入 UI（优先 ui.app，其次 novel_generator.ui.app）
 try:
     try:
-        from ui.app import NovelGeneratorApp
+        from ui.app import NovelGeneratorApp  # type: ignore
+
         logger.info("成功导入UI模块: ui.app")
     except Exception:
-        from novel_generator.ui.app import NovelGeneratorApp
+        from novel_generator.ui.app import NovelGeneratorApp  # type: ignore
+
         logger.info("成功导入UI模块: novel_generator.ui.app")
 except Exception as e:
     logger.error(f"无法导入UI模块: {traceback.format_exc()}")
@@ -82,7 +102,9 @@ except Exception as e:
     try:
         import tkinter as tk
         from tkinter import messagebox
-        root = tk.Tk(); root.withdraw()
+
+        root = tk.Tk()
+        root.withdraw()
         messagebox.showerror("启动失败", f"无法导入UI模块:\n{e}")
     except Exception:
         pass
@@ -92,6 +114,7 @@ except Exception as e:
     except Exception:
         pass
     sys.exit(1)
+
 
 def main():
     """应用入口，启动 GUI 应用"""
@@ -107,8 +130,10 @@ def main():
 
         # 设置窗口图标（可选）
         try:
+            script_dir = os.path.dirname(__file__)
+            local_resources = os.path.join(script_dir, "resources")
             icon_paths = [
-                os.path.join(os.path.dirname(__file__), "resources", "icon.ico"),
+                os.path.join(local_resources, "icon.ico"),
                 os.path.join(base_dir, "resources", "icon.ico"),
                 "resources/icon.ico",
             ]
@@ -140,6 +165,6 @@ def main():
             pass
         sys.exit(1)
 
+
 if __name__ == "__main__":
     main()
-
