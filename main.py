@@ -30,10 +30,8 @@ else:
 # 注入常见路径（尽量不依赖于磁盘目录以便 PyInstaller 的 PyiImporter 工作）
 current_dir = os.path.dirname(os.path.abspath(__file__))
 paths_to_add = [
-    os.path.join(base_dir, 'ui'),
-    os.path.join(base_dir, 'core'),
-    os.path.join(base_dir, 'utils'),
-    os.path.join(base_dir, 'templates'),
+    base_dir,
+    os.path.join(base_dir, 'novel_generator'),
     current_dir,
 ]
 for path in paths_to_add:
