@@ -20,13 +20,20 @@ def auto_build():
 
     # 确保 PyInstaller 已安装
     try:
-        import PyInstaller
+        import PyInstaller  # type: ignore[import-untyped]
 
         print(f"PyInstaller 版本: {PyInstaller.__version__}")
     except ImportError:
         print("正在安装 PyInstaller...")
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller>=6.0.0"]
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "pyinstaller>=6.0.0",
+            ]
         )
         print("PyInstaller 安装完成")
 
@@ -102,10 +109,40 @@ def auto_build():
         "configparser",
         "json",
         "threading",
+        # 添加项目核心模块
+        "ui",
+        "ui.app",
+        "ui.dialogs",
+        "core",
+        "core.generator",
+        "core.media_generator",
+        "core.media_task_manager",
+        "core.model_manager",
+        "core.sanqianliu_generator",
+        "core.sanqianliu_interface",
+        "utils",
+        "utils.common",
+        "utils.config",
+        "utils.quality",
+        "templates",
+        "templates.prompts",
+        # 添加 novel_generator 命名空间
+        "novel_generator",
+        "novel_generator.ui",
+        "novel_generator.ui.app",
+        "novel_generator.ui.dialogs",
+        "novel_generator.core",
+        "novel_generator.core.generator",
+        "novel_generator.utils",
+        "novel_generator.templates",
     ]
 
     for imp in hidden_imports:
         pyinstaller_args.append(f"--hidden-import={imp}")
+
+    # 收集所有项目模块（强制包含源代码）
+    for pkg in ["ui", "core", "utils", "templates", "novel_generator"]:
+        pyinstaller_args.append(f"--collect-all={pkg}")
 
     # 添加主程序
     pyinstaller_args.append("main.py")
@@ -117,7 +154,9 @@ def auto_build():
     start_time = time.time()
 
     try:
-        result = subprocess.run(pyinstaller_args, capture_output=True, text=True)
+        result = subprocess.run(  # noqa: E501
+            pyinstaller_args, capture_output=True, text=True
+        )
 
         elapsed_time = time.time() - start_time
         minutes = int(elapsed_time // 60)
@@ -149,7 +188,9 @@ def auto_build():
                     "generate_music": False,
                 }
 
-                config_path = os.path.join("dist", "novel_generator_config.json")
+                config_path = os.path.join(  # noqa: E501
+                    "dist", "novel_generator_config.json"
+                )
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump(clean_config, f, ensure_ascii=False, indent=2)
                 print(f"已创建配置文件: {config_path}")

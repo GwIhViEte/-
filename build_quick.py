@@ -28,7 +28,7 @@ def clean_build_dirs():
 def ensure_pyinstaller():
     """确保PyInstaller已安装"""
     try:
-        import PyInstaller
+        import PyInstaller  # type: ignore[import-untyped]
 
         print(f"PyInstaller 版本: {PyInstaller.__version__}")
         return True
@@ -154,7 +154,47 @@ def main():
         "--hidden-import=http.client",
         "--hidden-import=tkinter",
         "--hidden-import=tkinter.ttk",
+        "--hidden-import=tkinter.scrolledtext",
+        "--hidden-import=tkinter.filedialog",
+        "--hidden-import=tkinter.messagebox",
         "--hidden-import=configparser",
+        "--hidden-import=json",
+        "--hidden-import=asyncio",
+        "--hidden-import=threading",
+        "--hidden-import=PIL.Image",
+        "--hidden-import=PIL.ImageTk",
+        # 项目核心模块
+        "--hidden-import=ui",
+        "--hidden-import=ui.app",
+        "--hidden-import=ui.dialogs",
+        "--hidden-import=core",
+        "--hidden-import=core.generator",
+        "--hidden-import=core.media_generator",
+        "--hidden-import=core.media_task_manager",
+        "--hidden-import=core.model_manager",
+        "--hidden-import=core.sanqianliu_generator",
+        "--hidden-import=core.sanqianliu_interface",
+        "--hidden-import=utils",
+        "--hidden-import=utils.common",
+        "--hidden-import=utils.config",
+        "--hidden-import=utils.quality",
+        "--hidden-import=templates",
+        "--hidden-import=templates.prompts",
+        # novel_generator 命名空间
+        "--hidden-import=novel_generator",
+        "--hidden-import=novel_generator.ui",
+        "--hidden-import=novel_generator.ui.app",
+        "--hidden-import=novel_generator.ui.dialogs",
+        "--hidden-import=novel_generator.core",
+        "--hidden-import=novel_generator.core.generator",
+        "--hidden-import=novel_generator.utils",
+        "--hidden-import=novel_generator.templates",
+        # 收集所有项目模块
+        "--collect-all=ui",
+        "--collect-all=core",
+        "--collect-all=utils",
+        "--collect-all=templates",
+        "--collect-all=novel_generator",
         "--exclude-module=matplotlib",
         "--exclude-module=numpy",
         "--exclude-module=scipy",
@@ -236,7 +276,9 @@ def main():
             }
 
             try:
-                config_path = os.path.join("dist", "novel_generator_config.json")
+                config_path = os.path.join(  # noqa: E501
+                    "dist", "novel_generator_config.json"
+                )
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump(clean_config, f, ensure_ascii=False, indent=2)
                 print("已创建默认配置文件")

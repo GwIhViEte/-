@@ -7,6 +7,7 @@ import string
 import time
 import json
 import argparse
+from typing import Any
 
 
 def generate_random_name(length=8):
@@ -20,7 +21,10 @@ def clean_sensitive_info():
 
     try:
         # 清理配置文件中的API密钥
-        config_files = ["novel_generator_config.json", "novel_generator_config.ini"]
+        config_files = [
+            "novel_generator_config.json",
+            "novel_generator_config.ini",
+        ]
 
         for config_file in config_files:
             if os.path.exists(config_file):
@@ -51,8 +55,10 @@ def clean_sensitive_info():
                         if os.path.exists(config_file):
                             config.read(config_file)
 
-                            if "DEFAULT" in config and "api_key" in config["DEFAULT"]:
-                                config["DEFAULT"]["api_key"] = ""
+                            default_section = config.get("DEFAULT", {})
+                            if "api_key" in default_section:
+                                default_section["api_key"] = ""
+                                config["DEFAULT"] = default_section
 
                             with open(config_file, "w", encoding="utf-8") as f:
                                 config.write(f)
@@ -119,27 +125,41 @@ def main():
 
     # 确保 PyInstaller 已安装
     try:
-        import PyInstaller
+        import PyInstaller  # type: ignore[import-untyped]
 
         print(f"PyInstaller 版本: {PyInstaller.__version__}")
     except ImportError:
         print("正在安装 PyInstaller...")
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller>=6.0.0"]
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "pyinstaller>=6.0.0",
+            ]
         )
         print("PyInstaller 安装完成")
 
     # 尝试安装混淆工具
     try:
-        import pyarmor
+        import pyarmor  # type: ignore[import-not-found]
     except ImportError:
         print("正在安装 PyArmor（代码保护工具）...")
         try:
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "--upgrade", "pyarmor"]
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "pyarmor",
+                ]
             )
             print("PyArmor 安装完成")
-            import pyarmor
+            import pyarmor  # type: ignore[import-not-found]
         except Exception as e:
             print(f"警告: PyArmor 安装失败: {e}")
             print("将继续使用基本保护措施...")
@@ -214,9 +234,8 @@ def main():
 
                 try:
                     # 检查PyArmor版本并使用对应的命令
-                    # import pyarmor  # Already imported above
-
-                    pyarmor_version = pyarmor.__version__
+                    pyarmor_mod: Any = pyarmor  # type: ignore[name-defined]
+                    pyarmor_version = pyarmor_mod.__version__
                     print(f"PyArmor版本: {pyarmor_version}")
 
                     # PyArmor 8.x 使用新的命令语法
@@ -253,7 +272,9 @@ def main():
                         ]
 
                     print("执行PyArmor命令:", " ".join(pyarmor_cmd))
-                    result = subprocess.run(pyarmor_cmd, capture_output=True, text=True)
+                    result = subprocess.run(  # noqa: E501
+                        pyarmor_cmd, capture_output=True, text=True
+                    )
 
                     if result.returncode == 0:
                         print("代码加密成功！将使用加密后的代码打包")
@@ -323,7 +344,8 @@ def main():
 
     # 添加反调试措施
     # pyinstaller_args.append(
-    #     "--key=" + ''.join(random.choice(string.hexdigits) for _ in range(16))
+    #     "--key="
+    #     + ''.join(random.choice(string.hexdigits) for _ in range(16))
     # )
 
     # 添加隐藏导入
@@ -340,9 +362,39 @@ def main():
         "tkinter.scrolledtext",
         "tkinter.filedialog",
         "tkinter.messagebox",
+        # 添加项目核心模块
+        "ui",
+        "ui.app",
+        "ui.dialogs",
+        "core",
+        "core.generator",
+        "core.media_generator",
+        "core.media_task_manager",
+        "core.model_manager",
+        "core.sanqianliu_generator",
+        "core.sanqianliu_interface",
+        "utils",
+        "utils.common",
+        "utils.config",
+        "utils.quality",
+        "templates",
+        "templates.prompts",
+        # 添加 novel_generator 命名空间
+        "novel_generator",
+        "novel_generator.ui",
+        "novel_generator.ui.app",
+        "novel_generator.ui.dialogs",
+        "novel_generator.core",
+        "novel_generator.core.generator",
+        "novel_generator.utils",
+        "novel_generator.templates",
     ]
     for imp in hidden_imports:
         pyinstaller_args.append(f"--hidden-import={imp}")
+
+    # 收集所有项目模块（强制包含源代码）
+    for pkg in ["ui", "core", "utils", "templates", "novel_generator"]:
+        pyinstaller_args.append(f"--collect-all={pkg}")
 
     # 添加主程序
     pyinstaller_args.append(main_script)
@@ -372,7 +424,10 @@ def main():
                 shutil.copy("README.md", os.path.join("dist", "使用说明.md"))
 
             if os.path.exists("UPDATE_NOTES_v4.0.md"):
-                shutil.copy("UPDATE_NOTES_v4.0.md", os.path.join("dist", "更新说明.md"))
+                shutil.copy(
+                    "UPDATE_NOTES_v4.0.md",
+                    os.path.join("dist", "更新说明.md"),
+                )
 
             if os.path.exists("USER_GUIDE.md"):
                 shutil.copy("USER_GUIDE.md", os.path.join("dist", "用户指南.md"))
