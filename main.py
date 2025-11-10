@@ -3,8 +3,9 @@ import sys
 import logging
 import traceback
 import importlib
+import importlib.machinery
 import importlib.util
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 # 日志配置
 logging.basicConfig(
@@ -29,24 +30,57 @@ else:
     base_dir = os.path.dirname(os.path.abspath(__file__))
     logger.info(f"运行于开发环境，基准目录: {base_dir}")
 
-# 注入常见路径（尽量不依赖于磁盘目录以便 PyInstaller 的 PyiImporter 工作）
 current_dir = os.path.dirname(os.path.abspath(__file__))
-paths_to_add = [
-    base_dir,
-    os.path.join(base_dir, 'novel_generator'),
-    os.path.join(base_dir, 'lib'),
-    os.path.join(base_dir, 'library.zip'),
-    os.path.dirname(sys.executable) if hasattr(sys, 'executable') else '',
-    current_dir,
-    os.getcwd(),
-]
-for path in paths_to_add:
-    if not path:
-        continue
-    normalized_path = os.path.abspath(path)
-    if os.path.exists(normalized_path) and normalized_path not in sys.path:
-        sys.path.insert(0, normalized_path)
-        logger.info(f"注入路径到 sys.path: {normalized_path}")
+
+
+def _expand_with_parents(path: str, depth: int = 2) -> Iterable[str]:
+    """Generate ``path`` and up to ``depth`` parent directories."""
+
+    current = os.path.abspath(path)
+    for _ in range(depth + 1):
+        if current:
+            yield current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+
+def _collect_bootstrap_paths() -> Iterable[str]:
+    """Collect directories/archives that may host project modules."""
+
+    roots = [
+        base_dir,
+        current_dir,
+        os.getcwd(),
+        os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv else '',
+        os.path.dirname(sys.executable) if hasattr(sys, 'executable') else '',
+    ]
+
+    for root in roots:
+        if not root:
+            continue
+        for candidate in _expand_with_parents(root, depth=3):
+            yield candidate
+            for sub in ("novel_generator", "ui", "core", "utils", "templates", "lib"):
+                yield os.path.join(candidate, sub)
+            if os.path.isdir(candidate):
+                library_zip = os.path.join(candidate, "library.zip")
+                if os.path.isfile(library_zip):
+                    yield library_zip
+                try:
+                    entries = os.listdir(candidate)
+                except OSError:
+                    entries = []
+                for entry in entries:
+                    if entry.lower().endswith((".zip", ".pkg")):
+                        yield os.path.join(candidate, entry)
+
+
+for bootstrap_path in _iter_unique_paths(_collect_bootstrap_paths()):
+    if bootstrap_path not in sys.path:
+        sys.path.insert(0, bootstrap_path)
+        logger.info(f"注入路径到 sys.path: {bootstrap_path}")
 
 
 def _iter_unique_paths(paths: Iterable[str]) -> Iterable[str]:
@@ -65,26 +99,20 @@ def _iter_unique_paths(paths: Iterable[str]) -> Iterable[str]:
         yield normalized
 
 
-def _locate_module_root(module_name: str, search_roots: Iterable[str]) -> Optional[str]:
-    """Try to find a sys.path entry that contains the requested module."""
-
-    parts = module_name.split('.')
-    relative_dir = os.path.join(*parts[:-1]) if len(parts) > 1 else ''
-    module_file_stem = parts[-1]
-    filenames = [module_file_stem + ext for ext in ('.py', '.pyc', '.pyo')]
+def _locate_module_spec(
+    module_name: str, search_roots: Sequence[str]
+) -> Optional[importlib.machinery.ModuleSpec]:
+    """Find a module spec using PathFinder against explicit search roots."""
 
     for root in search_roots:
         if not root:
             continue
-        candidate_dir = os.path.join(root, relative_dir)
-        if os.path.isdir(candidate_dir):
-            for name in filenames:
-                if os.path.isfile(os.path.join(candidate_dir, name)):
-                    return os.path.abspath(root)
-        for name in filenames:
-            candidate_file = os.path.join(root, relative_dir, name)
-            if os.path.isfile(candidate_file):
-                return os.path.abspath(root)
+        try:
+            spec = importlib.machinery.PathFinder.find_spec(module_name, [root])
+        except ImportError:
+            continue
+        if spec is not None:
+            return spec
     return None
 
 
@@ -92,13 +120,7 @@ def _import_ui_module() -> type:
     module_candidates = ('ui.app', 'novel_generator.ui.app')
     search_roots = list(
         _iter_unique_paths(
-            [
-                base_dir,
-                current_dir,
-                os.getcwd(),
-                os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv else '',
-                os.path.dirname(sys.executable) if hasattr(sys, 'executable') else '',
-            ]
+            list(_collect_bootstrap_paths())
         )
     )
 
@@ -112,26 +134,25 @@ def _import_ui_module() -> type:
             return module.NovelGeneratorApp
         except ModuleNotFoundError as exc:
             logger.warning(f"直接导入 {module_name} 失败: {exc}")
-            module_root = _locate_module_root(module_name, search_roots)
-            if module_root:
-                normalized_root = os.path.abspath(module_root)
-            else:
-                normalized_root = None
-            if normalized_root and normalized_root not in sys.path:
-                sys.path.insert(0, normalized_root)
-                logger.info(f"动态注入路径到 sys.path: {normalized_root}")
-            if normalized_root:
-                importlib.invalidate_caches()
+            spec = _locate_module_spec(module_name, search_roots)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                loader = spec.loader
+                assert loader is not None
                 try:
-                    module = importlib.import_module(module_name)
-                    logger.info(f"通过文件系统导入UI模块: {module_name}")
+                    sys.modules[module_name] = module
+                    loader.exec_module(module)
+                    logger.info(f"通过路径发现导入UI模块: {module_name}")
                     return module.NovelGeneratorApp
-                except ModuleNotFoundError as retry_exc:
+                except Exception as retry_exc:  # pragma: no cover - propagate runtime issues
                     last_error = retry_exc
-                    logger.debug(
-                        "模块在文件系统中找到，但导入仍失败: %s", retry_exc
-                    )
+                    logger.debug("模块通过 spec 加载失败: %s", retry_exc)
                     continue
+                finally:
+                    if module_name in sys.modules and not hasattr(
+                        sys.modules[module_name], "NovelGeneratorApp"
+                    ):
+                        sys.modules.pop(module_name, None)
             last_error = exc
         except Exception as exc:  # pragma: no cover - propagate unexpected import errors
             logger.error(f"导入 {module_name} 时出现异常: {traceback.format_exc()}")
