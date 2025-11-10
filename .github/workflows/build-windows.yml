@@ -1,0 +1,133 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11, 3.12]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: Install additional dependencies for packaging
+      run: |
+        pip install aiohttp pillow
+
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller --onefile --windowed --name "AI小说生成器_v${{ matrix.python-version }}" --icon=resources/icon.ico main.py
+
+    - name: Create output directory
+      run: |
+        mkdir -p dist/windows
+
+    - name: Copy additional files
+      run: |
+        # Copy essential directories and files
+        mkdir -p dist/windows/core
+        mkdir -p dist/windows/utils  
+        mkdir -p dist/windows/templates
+        mkdir -p dist/windows/ui
+        mkdir -p dist/windows/resources
+        mkdir -p dist/windows/example_prompts
+        
+        # Copy core files
+        copy core\*.py dist\windows\core\
+        
+        # Copy utility files
+        copy utils\*.py dist\windows\utils\
+        
+        # Copy template files
+        copy templates\*.py dist\windows\templates\
+        
+        # Copy UI files
+        copy ui\*.py dist\windows\ui\
+        xcopy /E /I ui\assets dist\windows\ui\assets\
+        
+        # Copy resources
+        xcopy /E /I resources\* dist\windows\resources\
+        
+        # Copy examples
+        copy example_prompts\* dist\windows\example_prompts\
+        
+        # Copy main files
+        copy main.py dist\windows\
+        copy main_wrapper.py dist\windows\
+        
+        # Copy documentation
+        copy README.md dist\windows\
+        copy README_EN.md dist\windows\
+        
+        # Copy license
+        copy LICENSE.txt dist\windows\
+
+    - name: Create version info
+      run: |
+        # Create version info file
+        echo "Build Information" > dist/windows/build_info.txt
+        echo "==================" >> dist/windows/build_info.txt
+        echo "Build Date: %date%" >> dist/windows/build_info.txt
+        echo "Build Time: %time%" >> dist/windows/build_info.txt
+        echo "Python Version: ${{ matrix.python-version }}" >> dist/windows/build_info.txt
+        echo "Git Commit: ${{ github.sha }}" >> dist/windows/build_info.txt
+        echo "Branch: ${{ github.ref_name }}" >> dist/windows/build_info.txt
+
+    - name: Create installer script
+      run: |
+        # Create a simple installer script
+        echo @echo off > dist/windows/install.bat
+        echo echo AI小说生成器安装程序 >> dist/windows/install.bat
+        echo echo ======================== >> dist/windows/install.bat
+        echo echo 正在安装... >> dist/windows/install.bat
+        echo echo. >> dist/windows/install.bat
+        echo echo 安装完成！ >> dist/windows/install.bat
+        echo echo 请双击 AI小说生成器_v${{ matrix.python-version }}.exe 启动程序 >> dist/windows/install.bat
+        echo echo. >> dist/windows/install.bat
+        echo pause >> dist/windows/install.bat
+
+    - name: Create ZIP archive
+      run: |
+        cd dist/windows
+        7z a -tzip "../AI小说生成器_v${{ matrix.python-version }}_windows.zip" *
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: AI小说生成器_v${{ matrix.python-version }}_windows
+        path: |
+          dist/AI小说生成器_v${{ matrix.python-version }}.exe
+          dist/AI小说生成器_v${{ matrix.python-version }}_windows.zip
+        retention-days: 30
+
+    - name: Create Release (if tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/AI小说生成器_v${{ matrix.python-version }}.exe
+          dist/AI小说生成器_v${{ matrix.python-version }}_windows.zip
+        draft: false
+        prerelease: contains(github.ref, 'beta')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
