@@ -1,0 +1,11 @@
+# Ignore non-Python files for Black formatting
+*.yml
+*.yaml
+*.sh
+*.bat
+*.md
+*.txt
+*.json
+*.cfg
+*.ini
+*.toml

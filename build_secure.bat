@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 > nul
-title AI小说生成器 - 安全打包工具
+title AI_Novel_Generator - 安全打包工具
 color 0B
 
 echo ==========================================
-echo     AI小说生成器 - 安全打包工具 v1.0
+echo     AI_Novel_Generator - 安全打包工具 v1.0
 echo     防反编译增强版
 echo ==========================================
 echo.

@@ -1,9 +1,9 @@
 #!/bin/bash
-# AI小说生成器 - Linux自动构建脚本
+# AI_Novel_Generator - Linux自动构建脚本
 # 此脚本用于本地构建Linux可执行文件
 
 echo "========================================"
-echo "AI小说生成器 - Linux构建脚本"
+echo "AI_Novel_Generator - Linux构建脚本"
 echo "========================================"
 echo
 
@@ -56,7 +56,7 @@ echo
 python build_config.py
 
 # 执行PyInstaller构建
-pyinstaller --onefile --name "AI小说生成器_v5.0.0" main.py
+pyinstaller --onefile --name "AI_Novel_Generator" main.py
 
 if [ $? -ne 0 ]; then
     echo "构建失败！"
@@ -71,7 +71,7 @@ echo
 mkdir -p dist/release
 
 # 复制文件到发布目录
-cp "dist/AI小说生成器_v5.0.0" "dist/release/"
+cp "dist/AI_Novel_Generator" "dist/release/"
 cp main.py "dist/release/"
 cp main_wrapper.py "dist/release/"
 cp README*.md "dist/release/"
@@ -88,9 +88,9 @@ cp -r example_prompts "dist/release/" 2>/dev/null || true
 # 创建启动脚本
 cat > "dist/release/run.sh" << 'EOF'
 #!/bin/bash
-echo "AI小说生成器启动器"
-echo "=================="
-./AI小说生成器_v5.0.0
+echo "AI Novel Generator Launcher"
+echo "==========================="
+./AI_Novel_Generator
 EOF
 
 chmod +x "dist/release/run.sh"
@@ -110,7 +110,7 @@ echo "正在创建TAR.GZ压缩包..."
 echo
 
 cd dist/release
-tar -czf "../AI小说生成器_v5.0.0_linux.tar.gz" *
+tar -czf "../AI_Novel_Generator_linux.tar.gz" *
 
 cd ../..
 
@@ -119,8 +119,8 @@ echo "========================================"
 echo "构建完成！"
 echo "========================================"
 echo
-echo "可执行文件: dist/AI小说生成器_v5.0.0"
-echo "发布包: dist/AI小说生成器_v5.0.0_linux.tar.gz"
+echo "可执行文件: dist/AI_Novel_Generator"
+echo "发布包: dist/AI_Novel_Generator_linux.tar.gz"
 echo "发布目录: dist/release/"
 echo
 

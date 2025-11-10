@@ -42,7 +42,7 @@ jobs:
 
     - name: Build executable with PyInstaller
       run: |
-        pyinstaller --onefile --name "AI小说生成器_v${{ matrix.python-version }}" main.py
+        pyinstaller --onefile --name "AI_Novel_Generator" main.py
 
     - name: Create output directory
       run: |
@@ -104,12 +104,12 @@ jobs:
         # Create a launcher script
         cat > dist/linux/launcher.sh << 'EOF'
         #!/bin/bash
-        echo "AI小说生成器启动器"
-        echo "=================="
+        echo "AI Novel Generator Launcher"
+        echo "==========================="
         
         # Check if Python is available
         if ! command -v python3 &> /dev/null; then
-            echo "错误: 未找到Python3，请先安装Python"
+            echo "Error: Python3 not found, please install Python first"
             exit 1
         fi
         
@@ -118,7 +118,7 @@ jobs:
         
         # Run the executable
         cd "$DIR"
-        ./AI小说生成器_v${{ matrix.python-version }}
+        ./AI_Novel_Generator
         EOF
         
         chmod +x dist/linux/launcher.sh
@@ -126,15 +126,15 @@ jobs:
     - name: Create TAR archive
       run: |
         cd dist/linux
-        tar -czf "../AI小说生成器_v${{ matrix.python-version }}_linux.tar.gz" *
+        tar -czf "../AI_Novel_Generator_linux.tar.gz" *
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: AI小说生成器_v${{ matrix.python-version }}_linux
+        name: AI_Novel_Generator_linux_py${{ matrix.python-version }}
         path: |
-          dist/AI小说生成器_v${{ matrix.python-version }}
-          dist/AI小说生成器_v${{ matrix.python-version }}_linux.tar.gz
+          dist/AI_Novel_Generator
+          dist/AI_Novel_Generator_linux.tar.gz
         retention-days: 30
 
     - name: Create Release (if tag)
@@ -142,8 +142,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          dist/AI小说生成器_v${{ matrix.python-version }}
-          dist/AI小说生成器_v${{ matrix.python-version }}_linux.tar.gz
+          dist/AI_Novel_Generator
+          dist/AI_Novel_Generator_linux.tar.gz
         draft: false
         prerelease: contains(github.ref, 'beta')
       env:
